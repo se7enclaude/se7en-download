@@ -1,10 +1,10 @@
 # se7en
 
-TÃ©lÃ©charger, amÃ©liorer par IA, convertir, dÃ©couper et lire vos vidÃ©os, musiques et images.
+Télécharger, améliorer par IA, convertir, découper, séparer la voix, nettoyer le son et lire vos vidéos, musiques et images.
 
-**TÃ©lÃ©charger :** [se7en-Setup (Windows 10/11)](https://github.com/se7enclaude/se7en-download/releases/latest/download/se7en-Setup-1.1.0.exe)
+**Télécharger :** [se7en-Setup (Windows 10/11)](https://github.com/se7enclaude/se7en-download/releases/latest/download/se7en-Setup.exe)
 
-Une fois installÃ©, se7en se met Ã  jour tout seul. Au premier lancement, Windows SmartScreen peut afficher
-un avertissement (programme non signÃ©) : Â« Informations complÃ©mentaires Â» â†’ Â« ExÃ©cuter quand mÃªme Â».
+Une fois installé, se7en se met à jour tout seul. Au premier lancement, Windows SmartScreen peut afficher
+un avertissement (programme non signé) : « Informations complémentaires » → « Exécuter quand même ».
 
-N'utilisez se7en que pour du contenu que vous avez le droit de tÃ©lÃ©charger.
+N'utilisez se7en que pour du contenu que vous avez le droit de télécharger.
