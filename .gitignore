@@ -1,0 +1,17 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Node / UI
+frontend/node_modules/
+frontend/dist/
+# Build outputs
+build/
+dist/
+packaging/icon.ico
+# Local tooling
+.claude/
+
+# Images de référence (design de tiers) : pas dans le dépôt public
+design-system/uploads/

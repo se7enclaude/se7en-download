@@ -1,0 +1,23 @@
+se7en — Télécharger · IA · Convertir · Découper · Lire
+=====================================================
+
+Version installée (recommandée) : lancez se7en-Setup.exe, puis se7en depuis le menu Démarrer.
+  - Tout est inclus (FFmpeg, moteurs IA, modèles) : rien d'autre à installer.
+  - se7en se met à jour tout seul.
+  - Si Windows affiche "Windows a protégé votre ordinateur" :
+    cliquer sur "Informations complémentaires" puis "Exécuter quand même".
+
+Version portable (ce dossier) :
+1. Extraire TOUT le zip (clic droit sur le .zip > Extraire tout...).
+   Ne pas lancer se7en.exe directement depuis l'intérieur du zip.
+2. Ouvrir le dossier extrait et double-cliquer sur se7en.exe.
+   Le premier lancement peut prendre jusqu'à une minute (analyse antivirus).
+3. Vos réglages et votre historique restent dans le dossier "data" à côté de se7en.exe.
+
+Si la fenêtre ne s'ouvre pas, se7en s'ouvre dans le navigateur à la place.
+Pour retrouver la fenêtre : installer "Microsoft Edge WebView2 Runtime" (site officiel Microsoft).
+
+En cas de problème : Réglages > Avancé > Logs, ou envoyer le fichier data\logs\crash.log.
+
+N'utilisez se7en que pour des contenus que vous avez le droit de télécharger.
+Certains modèles IA sont sous licence non commerciale (usage personnel) : voir Réglages > Composants.
