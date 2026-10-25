@@ -1,0 +1,35 @@
+/* se7en Download launch animation: the download (see Splash.tsx). */
+.spd { --red: #F2564B; position: fixed; inset: 0; z-index: 1000; overflow: hidden; cursor: pointer; color: #fff; font-family: "Manrope", system-ui, sans-serif;
+  background: radial-gradient(70% 70% at 50% 40%, #241413 0%, #110a0a 65%, #070505 100%); display: flex; align-items: center; justify-content: center; }
+/* faint falling data in the background */
+.spd-rain { position: absolute; inset: -20% 0 0; opacity: 0; background-image: repeating-linear-gradient(90deg, transparent 0 46px, rgba(242, 86, 75, .10) 46px 47px);
+  mask: linear-gradient(180deg, transparent, #000 30%, #000 70%, transparent); -webkit-mask: linear-gradient(180deg, transparent, #000 30%, #000 70%, transparent);
+  animation: spd-in .6s forwards, spd-rain 2.4s linear infinite; }
+.spd-center { position: relative; display: flex; flex-direction: column; align-items: center; }
+.spd-arrow { color: var(--red); opacity: 0; transform: translateY(-60px); animation: spd-drop .5s cubic-bezier(.3, 1.4, .5, 1) forwards; filter: drop-shadow(0 0 14px rgba(242, 86, 75, .6)); margin-bottom: 10px; }
+.spd-word { display: flex; font: 400 132px/1 "Anton", Impact, sans-serif; letter-spacing: .02em; height: 140px; }
+.spd-l { position: relative; display: inline-block; opacity: 0; transform: translateY(-70vh); animation: spd-fall .62s calc(.3s + var(--i) * .13s) cubic-bezier(.3, 1.35, .55, 1) forwards; }
+.spd-l.seven { color: var(--red); text-shadow: 0 0 30px rgba(242, 86, 75, .55); }
+.spd-streak { position: absolute; left: 50%; bottom: 100%; width: 3px; height: 70vh; margin-left: -1.5px; background: linear-gradient(180deg, rgba(242, 86, 75, 0), rgba(242, 86, 75, .55)); opacity: 1;
+  animation: spd-streak .35s calc(.72s + var(--i) * .13s) ease-out forwards; }
+.spd-progress { width: 420px; height: 4px; border-radius: 4px; background: rgba(255, 255, 255, .1); overflow: hidden; margin-top: 22px; }
+.spd-fill { display: block; height: 100%; background: linear-gradient(90deg, #ff8a7f, var(--red)); box-shadow: 0 0 14px rgba(242, 86, 75, .7); border-radius: 4px; }
+.spd-meta { width: 420px; display: flex; justify-content: space-between; margin-top: 10px; font: 600 11px/1 "Manrope", sans-serif; letter-spacing: .2em; color: rgba(255, 255, 255, .5); }
+.spd-pct { font-variant-numeric: tabular-nums; letter-spacing: .06em; color: #fff; }
+.spd-tag { margin-top: 26px; font: 500 14px/1.4 "Manrope", sans-serif; color: rgba(255, 255, 255, .6); opacity: 0; animation: spd-in .5s 1.85s forwards; }
+/* « done » flash on the whole word */
+.spd-word { animation: spd-flash .5s 1.75s ease-out; }
+.spd-foot { position: absolute; left: 0; right: 0; bottom: 34px; display: flex; justify-content: center; gap: 22px; font: 600 10px/1 "Manrope", sans-serif; letter-spacing: .14em; text-transform: uppercase; color: rgba(255, 255, 255, .4); opacity: 0; animation: spd-in .4s .6s forwards; }
+/* exit: pulled down into the tray */
+.spd.leaving .spd-word { animation: spd-take .42s cubic-bezier(.55, 0, .45, 1) forwards; }
+.spd.leaving .spd-progress, .spd.leaving .spd-meta, .spd.leaving .spd-tag, .spd.leaving .spd-foot, .spd.leaving .spd-arrow { animation: spd-out .22s forwards; }
+.spd.leaving { animation: spd-out .16s .4s forwards; }
+@keyframes spd-drop { to { opacity: 1; transform: none; } }
+@keyframes spd-fall { 0% { opacity: 1; transform: translateY(-70vh); } 100% { opacity: 1; transform: none; } }
+@keyframes spd-streak { to { opacity: 0; height: 0; } }
+@keyframes spd-flash { 0% { filter: brightness(2.2) drop-shadow(0 0 20px rgba(255, 255, 255, .7)); } 100% { filter: none; } }
+@keyframes spd-take { to { transform: translateY(40px) scale(.6); opacity: 0; } }
+@keyframes spd-rain { to { background-position: 0 0; transform: translateY(20%); } }
+@keyframes spd-in { to { opacity: 1; } }
+@keyframes spd-out { to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .spd * { animation-duration: .01s !important; animation-delay: 0s !important; } }
