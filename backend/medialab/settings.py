@@ -36,12 +36,12 @@ class DownloadSettings(BaseModel):
     default_folder: str = Field(default_factory=_default_video_dir)
     default_mode: Literal["av", "video", "audio", "image"] = "av"
     default_quality: str = "best"  # best | 2160 | 1440 | 1080 | 720 | 480 | 360 | 240 | 144
-    default_container: Literal["mp4", "mkv", "webm"] = "mp4"
+    default_container: Literal["mp4", "mkv", "webm", "mov"] = "mp4"
     # compat = plays everywhere (H.264 + AAC in MP4, converted when the source lacks it)
     default_video_codec: Literal["compat", "auto", "h264", "h265", "av1", "vp9"] = "compat"
     default_image_format: Literal["jpg", "png", "webp"] = "jpg"
     warn_duplicates: bool = True
-    default_audio_format: Literal["best", "mp3", "aac", "m4a", "opus", "wav", "flac"] = "mp3"
+    default_audio_format: Literal["best", "mp3", "aac", "m4a", "opus", "ogg", "wav", "flac", "alac"] = "mp3"
     default_audio_bitrate: int = 320
     concurrent_downloads: int = Field(3, ge=1, le=16)
     concurrent_fragments: int = Field(8, ge=1, le=32)

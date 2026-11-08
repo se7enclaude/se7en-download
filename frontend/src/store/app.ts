@@ -255,15 +255,34 @@ function onEvent(ev: AppEvent): void {
       useApp.setState({ historyVersion: s.historyVersion + 1 });
       break;
     case "component": {
-      const d = ev.data as { id: string } & ComponentProgress;
+      const d = ev.data as { id: string; version?: string } & ComponentProgress;
       useApp.setState({ componentProgress: { ...s.componentProgress, [d.id]: d } });
+      const name = s.components.find((c) => c.id === d.id)?.name ?? d.id;
       if (d.state === "installed" || d.state === "restart_required") {
         s.loadComponents();
         s.loadCapabilities().catch(() => undefined);
-        s.toast({ kind: "success", title: translate("components.installed", { name: d.id }) });
+        s.toast({ kind: "success", title: translate("components.installed", { name }) });
+      }
+      if (d.state === "up_to_date") {
+        s.loadComponents();
+        s.toast({ kind: "info", title: translate("components.alreadyUpToDate", { name, version: d.version ?? "" }) });
       }
       if (d.state === "failed") {
         s.toast({ kind: "error", title: translate("components.failed"), body: d.error?.message });
+      }
+      break;
+    }
+    case "component_updates": {
+      // a new version of a component was found by the background check (once per version)
+      const items = (ev.data?.items ?? []) as { id: string; name: string; version?: string; latest?: string }[];
+      s.loadComponents();
+      if (items.length && (!s.settings || s.settings.general.notifications)) {
+        s.toast({
+          kind: "info",
+          title: items.length === 1 ? translate("components.newVersionOne", { name: items[0].name, version: items[0].latest ?? "" }) : translate("components.newVersionMany", { n: items.length }),
+          body: items.map((i) => `${i.name} : ${i.version ?? "?"} → ${i.latest ?? "?"}`).join(" · "),
+          action: { label: translate("components.see"), run: () => s.goSettings("components") },
+        });
       }
       break;
     }

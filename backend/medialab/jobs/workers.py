@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ..db import Database
+from ..downloader import output_format
 from ..downloader.base import DownloadContext
 from ..downloader.registry import registry
 from ..errors import MediaLabError
@@ -47,11 +48,18 @@ def make_download_worker(settings: SettingsStore):
         dctx = DownloadContext(job_id=job["id"], settings=s, cancel=jctx.cancel, progress=jctx.progress,
                                temp_dir=jctx.temp_dir, attempt=jctx.attempt, strategy=jctx.strategy)
         res = provider.download(job["source"], opts, dctx)
-        return {
+        out = {
             "file_path": res.file_path, "title": res.title or job.get("title"), "platform": res.platform or job.get("platform"),
             "thumbnail_url": res.thumbnail, "resolution": res.resolution, "format": res.format, "size": res.size,
             "duration": res.duration, "extra_files": res.extra_files, "meta": res.meta,
         }
+        # The format chosen when pasting the link (MP3, FLAC, MKV…): convert what did not arrive in it.
+        conv = output_format.ensure(res.file_path, opts, s, jctx.cancel, jctx.progress)
+        if conv:
+            out.update(file_path=conv["file_path"], size=conv["size"], format=conv["format"],
+                       resolution=conv.get("resolution") or res.resolution,
+                       meta={**(res.meta or {}), "converted_to": conv["meta"].get("target")})
+        return out
     return worker
 
 

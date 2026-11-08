@@ -36,17 +36,45 @@ import { useT } from "../i18n";
 import { bytes, codecLabel, duration, num, speed } from "../lib/format";
 import { useApp } from "../store/app";
 
-const GENERIC_QUALITIES = ["best", "2160", "1440", "1080", "720", "480", "360", "144"];
-const LOSSY = new Set(["mp3", "m4a", "aac", "opus"]);
+const LOSSY = new Set(["mp3", "m4a", "aac", "opus", "ogg"]);
 const AUDIO_ROWS: { f: string; br?: number }[] = [
   { f: "mp3", br: 320 },
   { f: "mp3", br: 192 },
   { f: "m4a", br: 256 },
   { f: "opus", br: 160 },
+  { f: "ogg", br: 192 },
   { f: "flac" },
+  { f: "alac" },
   { f: "wav" },
   { f: "best" },
 ];
+// « Convertir en » : every format offered right where the link is pasted
+const VIDEO_FORMATS = ["mp4", "mkv", "webm", "mov"];
+const AUDIO_FORMATS = ["mp3", "m4a", "opus", "ogg", "flac", "wav", "alac"];
+const IMAGE_FORMATS = ["jpg", "png", "webp"];
+const BITRATES = [320, 256, 192, 128, 96];
+const PICK_QUALITIES = ["best", "2160", "1440", "1080", "720", "480", "360"];
+const DEFAULT_BITRATE: Record<string, number> = { mp3: 320, m4a: 256, opus: 160, ogg: 192 };
+const audioLabel = (f: string) => (f === "m4a" ? "M4A · AAC" : f.toUpperCase());
+
+export interface Choice {
+  mode: Mode;
+  container: string;
+  audio_format: string;
+  audio_bitrate: number;
+  quality: string;
+  image_format: string;
+}
+
+/** Short name of the chosen output: « MP3 · 320 kbps », « MP4 · 1080p », « FLAC ». */
+export function choiceLabel(c: Choice, t: (k: string, v?: Record<string, string | number>) => string): string {
+  if (c.mode === "image") return c.image_format.toUpperCase();
+  if (c.mode === "audio") {
+    if (c.audio_format === "best") return t("convert.originalAudio");
+    return LOSSY.has(c.audio_format) ? `${audioLabel(c.audio_format)} · ${c.audio_bitrate} kbps` : audioLabel(c.audio_format);
+  }
+  return `${c.container.toUpperCase()} · ${c.quality === "best" ? t("quality.best") : c.quality === "2160" ? "4K" : `${c.quality}p`}`;
+}
 
 type Mode = "av" | "video" | "audio" | "image";
 const rise = (i: number) => ({ animation: "se7en-rise .8s var(--ease-out) both", animationDelay: `${i * 90}ms` });
@@ -100,6 +128,44 @@ export function DownloadPage() {
   const [embedMeta, setEmbedMeta] = useState(d?.embed_metadata ?? true);
   // what the hero chips ask for: the analysis then opens on that mode (when the media has it)
   const [homeMode, setHomeMode] = useState<"av" | "audio" | "image">(d?.default_mode === "audio" ? "audio" : d?.default_mode === "image" ? "image" : "av");
+  // What « Convertir en » asks for: applied to every analysis and batch, remembered for the next launches
+  const choice = useRef<Choice>({
+    mode: d?.default_mode ?? "av",
+    container: d?.default_container ?? "mp4",
+    audio_format: d?.default_audio_format ?? "mp3",
+    audio_bitrate: d?.default_audio_bitrate ?? 320,
+    quality: d?.default_quality ?? "best",
+    image_format: d?.default_image_format ?? "jpg",
+  });
+  const pick = useCallback((patch: Partial<Choice>) => {
+    const prev = choice.current;
+    const c = { ...prev, ...patch };
+    if (patch.audio_format && LOSSY.has(patch.audio_format) && !patch.audio_bitrate) {
+      c.audio_bitrate = LOSSY.has(prev.audio_format) ? prev.audio_bitrate : DEFAULT_BITRATE[patch.audio_format] ?? 192;
+    }
+    choice.current = c;
+    setMode(c.mode);
+    setContainer(c.container);
+    setAudioFormat(c.audio_format);
+    setAudioBitrate(c.audio_bitrate);
+    setQuality(c.quality);
+    setImageFormat(c.image_format);
+    setHomeMode(c.mode === "audio" ? "audio" : c.mode === "image" ? "image" : "av");
+    useApp
+      .getState()
+      .saveSettings({
+        download: {
+          default_mode: c.mode,
+          default_container: c.container,
+          default_audio_format: c.audio_format,
+          default_audio_bitrate: c.audio_bitrate,
+          default_quality: c.quality,
+          default_image_format: c.image_format,
+        } as any,
+      })
+      .catch(() => undefined);
+  }, []);
+  const currentChoice: Choice = { mode, container, audio_format: audioFormat, audio_bitrate: audioBitrate, quality, image_format: imageFormat };
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const reqId = useRef(0);
@@ -155,10 +221,15 @@ export function DownloadPage() {
         setInfo(r);
         setSelected(new Set(r.entries.map((_, i) => i)));
         if (d) {
-          const want: Mode = homeMode === "av" ? (d.default_mode === "video" ? "video" : "av") : homeMode;
+          // the « Convertir en » choice (not a preset left over from the previous link)
+          const c = choice.current;
+          const want: Mode = homeMode === "av" ? (c.mode === "video" ? "video" : "av") : homeMode;
           setMode(r.kind === "audio" ? "audio" : r.kind === "image" ? "image" : want === "image" && !r.thumbnail ? "av" : want);
-          setQuality(d.default_quality);
-          setContainer(d.default_container);
+          setQuality(c.quality);
+          setContainer(c.container);
+          setAudioFormat(c.audio_format);
+          setAudioBitrate(c.audio_bitrate);
+          setImageFormat(c.image_format);
           setVcodec(d.default_video_codec);
           setOutputDir("");
         }
@@ -411,7 +482,7 @@ export function DownloadPage() {
   if (view === "home")
     return (
       <div className="home">
-        <HomeHero mode={homeMode} setMode={setHomeMode} />
+        <HomeHero mode={homeMode} setMode={(m) => pick({ mode: m === "av" ? (choice.current.mode === "video" ? "video" : "av") : m })} />
         <div className="home-grid">
           <HomeIntro />
           <div className="home-main" style={rise(2)}>
@@ -461,7 +532,15 @@ export function DownloadPage() {
                     }}
                   />
                 )}
-                {!batch && (
+                {!batch && detections.length === 1 && (
+                  <Button size="lg" iconOnly icon={<ScanLine size={17} />} tip={t("download.analyze")} onClick={() => analyze()} />
+                )}
+                {!batch && detections.length === 1 && (
+                  <Button variant="primary" size="lg" icon={<Download size={17} />} loading={adding} onClick={downloadBatch} tip={t("download.directTip")}>
+                    {t("download.directNow", { fmt: choiceLabel(currentChoice, t) })}
+                  </Button>
+                )}
+                {!batch && detections.length !== 1 && (
                   <Button variant="primary" size="lg" icon={<ScanLine size={17} />} disabled={!text.trim()} onClick={() => analyze()}>
                     {t("download.analyze")}
                   </Button>
@@ -492,6 +571,7 @@ export function DownloadPage() {
                 </button>
               )}
             </div>
+            {!batch && <ConvertPicker t={t} value={currentChoice} onPick={pick} />}
             <AnimatePresence>
               {batch && (
                 <motion.div key="batch" initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="card card-pad home-panel">
@@ -509,10 +589,10 @@ export function DownloadPage() {
                     ))}
                   </div>
                   <div className="divider" />
-                  <GenericOptions {...{ t, mode, setMode, quality, setQuality, container, setContainer, audioFormat, setAudioFormat }} />
+                  <ConvertPicker t={t} value={currentChoice} onPick={pick} bare />
                   <div className="row" style={{ marginTop: 18 }}>
                     <FolderRow t={t} value={folder} onPick={pickFolder} />
-                    <Button variant="primary" size="lg" icon={<Download size={16} />} loading={adding} onClick={downloadBatch}>{t("download.addAll", { n: detections.length })}</Button>
+                    <Button variant="primary" size="lg" icon={<Download size={16} />} loading={adding} onClick={downloadBatch}>{t("download.addAllAs", { n: detections.length, fmt: choiceLabel(currentChoice, t) })}</Button>
                   </div>
                 </motion.div>
               )}
@@ -673,7 +753,7 @@ export function DownloadPage() {
             ) : isPlaylist || isGallery ? (
               <>
                 <span className="label">{isPlaylist ? t("download.playlistOptions") : t("download.gallery", { n: info!.entry_count ?? info!.entries.length })}</span>
-                {isPlaylist && <GenericOptions stacked {...{ t, mode, setMode, quality, setQuality, container, setContainer, audioFormat, setAudioFormat }} />}
+                {isPlaylist && <ConvertPicker t={t} value={currentChoice} onPick={pick} bare />}
               </>
             ) : (
               <>
@@ -733,7 +813,7 @@ export function DownloadPage() {
                     {info!.recommended && quality === info!.recommended.quality && <div className="smart-why">{info!.recommended.reasons.join(" · ")}</div>}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                       <Field label={t("download.container")}>
-                        <Select value={container} onChange={setContainer} options={["mp4", "mkv", "webm"].map((c) => ({ value: c, label: c.toUpperCase() }))} />
+                        <Select value={container} onChange={setContainer} options={VIDEO_FORMATS.map((c) => ({ value: c, label: c.toUpperCase() }))} />
                       </Field>
                       <Field label={t("download.codec")}>
                         <Select
@@ -773,7 +853,7 @@ export function DownloadPage() {
                               setAudioFormat(r.f);
                               if (r.br) setAudioBitrate(r.br);
                             }}
-                            label={r.f === "best" ? t("audio.originalShort") : r.f === "m4a" ? "AAC" : r.f.toUpperCase()}
+                            label={r.f === "best" ? t("audio.originalShort") : audioLabel(r.f)}
                             desc={r.br ? `${r.br} kbps${sourceAbr && r.br > sourceAbr * 1.1 ? ` · ${t("audio.aboveSourceShort", { abr: Math.round(sourceAbr) })}` : ""}` : r.f === "best" ? t("audio.noConversion") : t("audio.lossless")}
                             size={audioSize(r.f, r.br)}
                             approx
@@ -781,7 +861,7 @@ export function DownloadPage() {
                         );
                       })}
                     </div>
-                    {(audioFormat === "flac" || audioFormat === "wav") && <div className="field-hint">{t("audio.losslessNote")}</div>}
+                    {(audioFormat === "flac" || audioFormat === "wav" || audioFormat === "alac") && <div className="field-hint">{t("audio.losslessNote")}</div>}
                   </>
                 )}
                 <div className="divider" style={{ margin: "4px 0" }} />
@@ -1061,26 +1141,42 @@ function FolderRow({ t, value, onPick }: { t: ReturnType<typeof useT>; value: st
   );
 }
 
-function GenericOptions({ t, mode, setMode, quality, setQuality, container, setContainer, audioFormat, setAudioFormat, stacked }: any) {
+/** « Convertir en » : the output format (and its quality / bitrate) chosen where links are pasted. */
+function ConvertPicker({ t, value, onPick, bare }: { t: ReturnType<typeof useT>; value: Choice; onPick: (p: Partial<Choice>) => void; bare?: boolean }) {
+  const isAudio = value.mode === "audio";
+  const isImage = value.mode === "image";
+  const chip = (on: boolean, label: ReactNode, onClick: () => void, key: string, tip?: string) => (
+    <button key={key} type="button" className={`chip ${on ? "on" : ""}`} aria-pressed={on} title={tip} onClick={onClick} style={{ height: 28, cursor: "pointer" }}>
+      {label}
+    </button>
+  );
+  const group = (label: string, children: ReactNode) => (
+    <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      <span className="label" style={{ minWidth: 64 }}>{label}</span>
+      {children}
+    </div>
+  );
   return (
-    <div className="col" style={{ gap: 14, ...(stacked ? {} : { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }) }}>
-      <Field label={t("download.mode")}>
-        <Segmented value={mode} onChange={setMode} full options={[{ value: "av", label: t("mode.avShort") }, { value: "video", label: t("mode.videoShort") }, { value: "audio", label: t("mode.audioShort") }]} />
-      </Field>
-      {mode !== "audio" ? (
-        <>
-          <Field label={t("download.quality")} hint={t("download.genericQualityHint")}>
-            <Select value={quality} onChange={setQuality} options={GENERIC_QUALITIES.map((q) => ({ value: q, label: q === "best" ? t("quality.best") : `${q}p` }))} />
-          </Field>
-          <Field label={t("download.container")}>
-            <Select value={container} onChange={setContainer} options={["mp4", "mkv", "webm"].map((c) => ({ value: c, label: c.toUpperCase() }))} />
-          </Field>
-        </>
-      ) : (
-        <Field label={t("download.audioFormat")}>
-          <Select value={audioFormat} onChange={setAudioFormat} options={["mp3", "m4a", "opus", "flac", "wav", "best"].map((f) => ({ value: f, label: f === "best" ? t("audio.originalShort") : f.toUpperCase() }))} />
-        </Field>
-      )}
+    <div className={bare ? "convert-picker" : "card card-pad convert-picker"} style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: bare ? 0 : 14 }}>
+      <div className="row" style={{ gap: 8 }}>
+        <span className="label" style={{ color: "var(--text-primary)" }}>{t("convert.pickTitle")}</span>
+        <span className="faint" style={{ fontSize: 12 }}>{choiceLabel(value, t)}</span>
+      </div>
+      {group(t("convert.video"), VIDEO_FORMATS.map((f) => chip(!isAudio && !isImage && value.container === f, f.toUpperCase(), () => onPick({ mode: value.mode === "video" ? "video" : "av", container: f }), "v" + f)))}
+      {group(t("convert.audio"), [
+        ...AUDIO_FORMATS.map((f) => chip(isAudio && value.audio_format === f, audioLabel(f), () => onPick({ mode: "audio", audio_format: f }), "a" + f)),
+        chip(isAudio && value.audio_format === "best", t("convert.originalAudio"), () => onPick({ mode: "audio", audio_format: "best" }), "abest", t("audio.noConversion")),
+      ])}
+      {isImage && group(t("convert.image"), IMAGE_FORMATS.map((f) => chip(value.image_format === f, f.toUpperCase(), () => onPick({ image_format: f }), "i" + f)))}
+      {!isAudio &&
+        !isImage &&
+        group(
+          t("convert.quality"),
+          PICK_QUALITIES.map((q) => chip(value.quality === q, q === "best" ? t("quality.best") : q === "2160" ? "4K" : `${q}p`, () => onPick({ quality: q }), "q" + q)),
+        )}
+      {isAudio && LOSSY.has(value.audio_format) && group(t("convert.bitrate"), BITRATES.map((b) => chip(value.audio_bitrate === b, `${b} kbps`, () => onPick({ audio_bitrate: b }), "b" + b)))}
+      {isAudio && ["flac", "wav", "alac"].includes(value.audio_format) && <div className="field-hint">{t("convert.losslessHint")}</div>}
+      {!isAudio && !isImage && <div className="field-hint">{t("convert.videoHint")}</div>}
     </div>
   );
 }

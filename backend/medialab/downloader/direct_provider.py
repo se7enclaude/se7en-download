@@ -11,6 +11,7 @@ from urllib.parse import unquote, urlparse
 
 import httpx
 
+from .. import __version__
 from ..errors import Canceled, MediaLabError, classify
 from ..logging_setup import get_logger
 from ..settings import Settings
@@ -26,6 +27,9 @@ MEDIA_EXT = {
     "audio": {".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".opus"},
 }
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36"
+# Some servers (Wikimedia, archives…) refuse a browser name sent by a program that is not a browser
+# (HTTP 403 "robot policy") but accept a program that says who it is: second attempt with that.
+HONEST_UA = f"se7en/{__version__} (+https://github.com/se7enclaude/se7en-download)"
 
 
 def referer_headers(referer: str | None) -> dict[str, str]:
@@ -52,6 +56,10 @@ def _kind_from_ctype(ctype: str) -> str | None:
     return None
 
 
+class _RetryHonest(Exception):
+    """The server refused the browser name (403): try again saying it is se7en."""
+
+
 class DirectProvider(SourceProvider):
     id = "direct"
     name = "Direct link"
@@ -71,8 +79,12 @@ class DirectProvider(SourceProvider):
         try:
             with httpx.Client(follow_redirects=True, timeout=15, headers={"User-Agent": UA}) as c:
                 r = c.head(url)
+                ua = UA
+                if r.status_code == 403:
+                    ua = HONEST_UA
+                    r = c.head(url, headers={"User-Agent": ua})
                 if r.status_code >= 400 or not r.headers.get("content-type"):
-                    r = c.get(url, headers={"Range": "bytes=0-0"})
+                    r = c.get(url, headers={"Range": "bytes=0-0", "User-Agent": ua})
                 kind = _kind_from_ctype(r.headers.get("content-type", ""))
                 if not kind:
                     return None
@@ -125,36 +137,44 @@ class DirectProvider(SourceProvider):
             headers["Range"] = f"bytes={done}-"
         t_last, bytes_last = time.monotonic(), done
         speed = 0.0
-        try:
-            with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(20, read=60)) as c, \
-                    c.stream("GET", url, headers=headers) as r:
-                if r.status_code == 416:  # already complete
-                    pass
-                else:
-                    if r.status_code >= 400:
-                        raise MediaLabError("http_error", f"The server answered HTTP {r.status_code}.",
-                                            "The link may have expired.", r.status_code >= 500)
-                    if done and r.status_code != 206:
-                        done = 0  # server ignored Range: restart
-                    total = int(r.headers.get("content-length") or 0) + done or None
-                    with open(part, "ab" if done else "wb") as f:
-                        for chunk in r.iter_bytes(1 << 18):
-                            if ctx.cancel.is_set():
-                                raise Canceled()
-                            f.write(chunk)
-                            done += len(chunk)
-                            now = time.monotonic()
-                            if now - t_last >= 0.3:
-                                speed = (done - bytes_last) / (now - t_last)
-                                t_last, bytes_last = now, done
-                                ctx.progress({"stage": "downloading", "downloaded": done, "total": total,
-                                              "percent": done / total * 100 if total else None, "speed": speed,
-                                              "eta": (total - done) / speed if total and speed else None,
-                                              "connections": 1})
-        except (Canceled, MediaLabError):
-            raise
-        except (httpx.HTTPError, OSError) as e:
-            raise classify(e) from e
+        for _attempt in range(2):
+            try:
+                with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(20, read=60)) as c, \
+                        c.stream("GET", url, headers=headers) as r:
+                    if r.status_code == 403 and headers.get("User-Agent") == UA:
+                        raise _RetryHonest()
+                    if r.status_code == 416:  # already complete
+                        pass
+                    else:
+                        if r.status_code >= 400:
+                            raise MediaLabError("http_error", f"The server answered HTTP {r.status_code}.",
+                                                "The link may have expired.", r.status_code >= 500)
+                        if done and r.status_code != 206:
+                            done = 0  # server ignored Range: restart
+                        total = int(r.headers.get("content-length") or 0) + done or None
+                        with open(part, "ab" if done else "wb") as f:
+                            for chunk in r.iter_bytes(1 << 18):
+                                if ctx.cancel.is_set():
+                                    raise Canceled()
+                                f.write(chunk)
+                                done += len(chunk)
+                                now = time.monotonic()
+                                if now - t_last >= 0.3:
+                                    speed = (done - bytes_last) / (now - t_last)
+                                    t_last, bytes_last = now, done
+                                    ctx.progress({"stage": "downloading", "downloaded": done, "total": total,
+                                                  "percent": done / total * 100 if total else None, "speed": speed,
+                                                  "eta": (total - done) / speed if total and speed else None,
+                                                  "connections": 1})
+            except _RetryHonest:
+                log.info("HTTP 403 with a browser name: retrying as se7en", extra={"job_id": ctx.job_id})
+                headers["User-Agent"] = HONEST_UA
+                continue
+            except (Canceled, MediaLabError):
+                raise
+            except (httpx.HTTPError, OSError) as e:
+                raise classify(e) from e
+            break
         os.replace(part, dest)
         return DownloadResult(file_path=str(dest), title=stem, platform="direct", size=dest.stat().st_size,
                               thumbnail=url if _ext_kind(url) == "image" else None,

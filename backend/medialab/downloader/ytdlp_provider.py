@@ -303,10 +303,11 @@ class YtDlpProvider(SourceProvider):
         embed_thumb = options.get("embed_thumbnail", d.embed_thumbnail)
         if mode == "audio":
             if audio_format != "best":
-                target = {"aac": "aac", "m4a": "m4a"}.get(audio_format, audio_format)
+                # yt-dlp codec names: OGG = Vorbis; AAC lands in an .m4a file
+                target = {"aac": "m4a", "ogg": "vorbis"}.get(audio_format, audio_format)
                 pps.append({"key": "FFmpegExtractAudio", "preferredcodec": target,
                             "preferredquality": str(audio_bitrate or d.default_audio_bitrate)
-                            if audio_format in ("mp3", "aac", "m4a", "opus") else None,
+                            if audio_format in ("mp3", "aac", "m4a", "opus", "ogg") else None,
                             "nopostoverwrites": False})
             else:
                 pps.append({"key": "FFmpegExtractAudio", "preferredcodec": "best"})
@@ -442,7 +443,7 @@ class YtDlpProvider(SourceProvider):
         if mode == "audio":
             fmt_label = f"{Path(path).suffix.lstrip('.').upper()}"
             abr = af.get("abr")
-            if audio_format not in ("best", "wav", "flac"):
+            if audio_format not in ("best", "wav", "flac", "alac"):
                 fmt_label += f" {audio_bitrate or d.default_audio_bitrate} kbps"
             elif abr:
                 fmt_label += f" {int(abr)} kbps"
@@ -553,11 +554,11 @@ class YtDlpProvider(SourceProvider):
             acodecs = []
         fam = fmt.vcodec_family(info.get("vcodec"))
         target = None
-        if vcodec == "compat" and container == "mp4" and fam not in fmt.COMPAT_VCODECS:
+        if vcodec == "compat" and container in ("mp4", "mov") and fam not in fmt.COMPAT_VCODECS:
             target = "h264"
         elif vcodec not in ("auto", "compat", "", None) and fam != vcodec:
             target = vcodec
-        audio_bad = vcodec == "compat" and container == "mp4" and any(a not in fmt.COMPAT_ACODECS for a in acodecs)
+        audio_bad = vcodec == "compat" and container in ("mp4", "mov") and any(a not in fmt.COMPAT_ACODECS for a in acodecs)
         out = {"vcodec": fam, "acodec": acodecs[0] if acodecs else None, "height": info.get("height"),
                "width": info.get("width")}
         if target:

@@ -2,6 +2,30 @@
 from __future__ import annotations
 
 CHANGES: dict[str, dict[str, list[str]]] = {
+    "1.6.0": {
+        "fr": ["Nouveau : « Convertir en », juste sous le lien. Choisissez MP3, M4A (AAC), OPUS, OGG, FLAC, WAV, ALAC, "
+               "MP4, MKV, WEBM ou MOV, avec le débit ou la qualité, puis « Télécharger en MP3 » : sans passer par "
+               "l'analyse, pour un ou plusieurs liens. Le choix est retenu.",
+               "Les liens directs (fichiers vidéo ou audio) sont convertis eux aussi dans le format choisi.",
+               "Composants : chacun affiche « À jour (version X, vérifié le …) » ou « Mise à jour disponible ». "
+               "Un composant à jour n'est plus jamais retéléchargé, et se7en vous prévient quand une nouvelle "
+               "version de yt-dlp, FFmpeg ou Deno sort (vérification toutes les 12 h).",
+               "Corrigé : une mise à jour de FFmpeg ou de Deno était téléchargée mais pas utilisée.",
+               "Corrigé : un ancien yt-dlp téléchargé pouvait masquer le yt-dlp plus récent fourni avec se7en.",
+               "Corrigé : l'AAC donnait un fichier .m4a mal formé, illisible dans certains lecteurs.",
+               "Corrigé : certains liens directs (Wikimedia Commons…) échouaient avec « HTTP 403 »."],
+        "en": ["New: \"Convert to\", right under the link. Pick MP3, M4A (AAC), OPUS, OGG, FLAC, WAV, ALAC, MP4, MKV, "
+               "WEBM or MOV, with the bitrate or quality, then \"Download as MP3\": no analysis needed, for one or "
+               "many links. Your choice is remembered.",
+               "Direct links (video or audio files) are converted to the chosen format too.",
+               "Components: each one shows \"Up to date (version X, checked on …)\" or \"Update available\". A "
+               "component that is up to date is never downloaded again, and se7en tells you when a new yt-dlp, "
+               "FFmpeg or Deno version is out (checked every 12 h).",
+               "Fixed: an FFmpeg or Deno update was downloaded but not used.",
+               "Fixed: an old downloaded yt-dlp could hide the newer one shipped with se7en.",
+               "Fixed: AAC produced a malformed .m4a file some players could not read.",
+               "Fixed: some direct links (Wikimedia Commons…) failed with \"HTTP 403\"."],
+    },
     "1.5.1": {
         "fr": ['Nouvelle animation de lancement : « le téléchargement », les lettres tombent une à une pendant que la barre monte à 100 %.'],
         "en": ['New launch animation: the letters drop one by one while the progress bar climbs to 100 %.'],

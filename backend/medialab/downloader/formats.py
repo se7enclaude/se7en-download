@@ -17,11 +17,13 @@ CONTAINER_VCODECS = {
     "mp4": ("h264", "h265", "av1", "vp9"),
     "mkv": ("h264", "h265", "av1", "vp9", "vp8", "other"),
     "webm": ("vp9", "av1", "vp8"),
+    "mov": ("h264", "h265"),
 }
 CONTAINER_ACODECS = {
     "mp4": ("aac", "mp3", "opus", "flac", "ac3", "eac3"),
     "mkv": ("aac", "opus", "vorbis", "mp3", "flac", "ac3", "eac3", "other"),
     "webm": ("opus", "vorbis"),
+    "mov": ("aac", "mp3", "ac3", "eac3"),
 }
 # Preference order when the user leaves the codec on "Auto": compatibility first.
 # VP9 ranks before AV1 in MP4: Windows ships the VP9 decoder, the AV1 one is an optional
@@ -30,11 +32,12 @@ AUTO_CODEC_ORDER = {
     "mp4": ("h264", "vp9", "av1", "h265"),
     "mkv": ("av1", "vp9", "h265", "h264", "vp8", "other"),
     "webm": ("vp9", "av1", "vp8"),
+    "mov": ("h264", "h265"),
 }
 # Codecs every player reads (Windows Media Player, phones, TVs, editing software).
 COMPAT_VCODECS = ("h264",)
 COMPAT_ACODECS = ("aac", "mp3")
-AUDIO_PREF = {"mp4": ("aac", "opus", "mp3"), "webm": ("opus", "vorbis"), "mkv": ("opus", "aac", "vorbis", "mp3")}
+AUDIO_PREF = {"mp4": ("aac", "opus", "mp3"), "mov": ("aac", "mp3"), "webm": ("opus", "vorbis"), "mkv": ("opus", "aac", "vorbis", "mp3")}
 
 
 def vcodec_family(vcodec: str | None) -> str | None:
@@ -280,7 +283,8 @@ def select(formats: list[dict], *, mode: str = "av", quality: str = "best", cont
             raise LookupError("no audio")
         target = audio_format
         pref = {"m4a": ("aac",), "aac": ("aac",), "opus": ("opus",), "mp3": ("mp3", "aac"),
-                "flac": ("flac", "opus", "aac"), "wav": ("flac", "opus", "aac")}.get(target, ("opus", "aac"))
+                "flac": ("flac", "opus", "aac"), "wav": ("flac", "opus", "aac"),
+                "alac": ("flac", "opus", "aac"), "ogg": ("vorbis", "opus", "aac")}.get(target, ("opus", "aac"))
         best = max(pool, key=lambda f: _audio_rank(f, pref))
         # If the exact codec exists at (near) the best bitrate, prefer it to avoid re-encoding.
         same = [f for f in pool if acodec_family(f.get("acodec")) in pref[:1]]
@@ -316,11 +320,11 @@ def select(formats: list[dict], *, mode: str = "av", quality: str = "best", cont
     order = AUTO_CODEC_ORDER.get(container, AUTO_CODEC_ORDER["mkv"])
     compat = vcodec == "compat"
     if compat:
-        result["compat"] = container == "mp4"
+        result["compat"] = container in ("mp4", "mov")
         exact = [f for f in pool if vcodec_family(f.get("vcodec")) in COMPAT_VCODECS]
         if exact:
             pool = exact
-        elif container == "mp4":
+        elif container in ("mp4", "mov"):
             # e.g. YouTube 1440p/4K only exist in VP9/AV1: download the best one, convert to H.264.
             result["reencode_to"] = "h264"
             result["reencode_reason"] = "compat"
@@ -336,7 +340,7 @@ def select(formats: list[dict], *, mode: str = "av", quality: str = "best", cont
     if compatible:
         pool = compatible
     elif not result["reencode_to"]:
-        result["reencode_to"] = "h264" if container == "mp4" else ("vp9" if container == "webm" else None)
+        result["reencode_to"] = "h264" if container in ("mp4", "mov") else ("vp9" if container == "webm" else None)
         result["reencode_reason"] = f"No source codec fits in {container.upper()}"
     result["needs_reencode"] = bool(result["reencode_to"])
     video = max(pool, key=lambda f: _fmt_rank(f, order))
