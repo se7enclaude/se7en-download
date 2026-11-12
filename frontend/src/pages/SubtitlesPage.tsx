@@ -222,21 +222,47 @@ function Workspace({ pid, onClose }: { pid: string; onClose: () => void }) {
   };
 
   // ---------------------------------------------------------------- saving (debounced)
+  // The latest edits, and the save waiting for its 700 ms: flushed right away when the project
+  // closes, and before an export or a burn (they read the project saved on disk).
+  const latest = useRef({ cues, style });
+  latest.current = { cues, style };
+  const pendingSave = useRef<number | null>(null);
+  const alive = useRef(true);
+  const saveNow = useCallback(async () => {
+    if (pendingSave.current !== null) {
+      window.clearTimeout(pendingSave.current);
+      pendingSave.current = null;
+    }
+    if (!dirty.current || !latest.current.style) return;
+    if (alive.current) setSaved("saving");
+    try {
+      await api.put(`/api/subtitles/projects/${pid}`, latest.current);
+      dirty.current = false;
+      if (alive.current) setSaved("saved");
+    } catch {
+      if (alive.current) setSaved("dirty");
+    }
+  }, [pid]);
   useEffect(() => {
     if (!project || !dirty.current) return;
     setSaved("dirty");
-    const h = window.setTimeout(async () => {
-      setSaved("saving");
-      try {
-        await api.put(`/api/subtitles/projects/${pid}`, { cues, style });
-        dirty.current = false;
-        setSaved("saved");
-      } catch {
-        setSaved("dirty");
-      }
+    pendingSave.current = window.setTimeout(() => {
+      pendingSave.current = null;
+      void saveNow();
     }, 700);
-    return () => window.clearTimeout(h);
+    return () => {
+      if (pendingSave.current !== null) window.clearTimeout(pendingSave.current);
+      pendingSave.current = null;
+    };
   }, [cues, style]); // eslint-disable-line react-hooks/exhaustive-deps
+  // closing the project (or the page): the last edits are not lost
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+      void saveNow();
+    };
+  }, [saveNow]);
 
   // ---------------------------------------------------------------- edits with undo / redo
   // (the previous state is read *before* the ref changes: state updaters run later, lazily)
@@ -398,8 +424,15 @@ function Workspace({ pid, onClose }: { pid: string; onClose: () => void }) {
   };
 
   // ---------------------------------------------------------------- keyboard
+  // The page stays mounted in the background (KEEP_ALIVE): another tab must not pause the video,
+  // delete a cue or undo here. Leaving the tab pauses the video.
+  const page = useApp((s) => s.page);
+  useEffect(() => {
+    if (page !== "subtitles") pb.mediaRef.current?.pause();
+  }, [page, pb.mediaRef]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (useApp.getState().page !== "subtitles") return;
       const el = e.target as HTMLElement;
       const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
@@ -531,7 +564,7 @@ function Workspace({ pid, onClose }: { pid: string; onClose: () => void }) {
             )}
             {tab === "export" && (
               <ExportPanel pid={pid} project={project} burnJob={burnJob} settingsFolder={settings?.subtitles?.output_folder ?? ""}
-                onBurn={(id) => setBurnId(id)} />
+                onBurn={(id) => setBurnId(id)} beforeExport={saveNow} />
             )}
           </div>
         </div>
@@ -705,7 +738,7 @@ function GeneratePanel({
 }
 
 // ================================================================== export
-function ExportPanel({ pid, project, burnJob, settingsFolder, onBurn }: { pid: string; project: SubProject; burnJob?: Job; settingsFolder: string; onBurn: (id: string) => void }) {
+function ExportPanel({ pid, project, burnJob, settingsFolder, onBurn, beforeExport }: { pid: string; project: SubProject; burnJob?: Job; settingsFolder: string; onBurn: (id: string) => void; beforeExport: () => Promise<void> }) {
   const t = useT();
   const toast = useApp((s) => s.toast);
   const openInPlayer = useApp((s) => s.openInPlayer);
@@ -717,6 +750,7 @@ function ExportPanel({ pid, project, burnJob, settingsFolder, onBurn }: { pid: s
   const exportAs = async (format: string) => {
     setBusy(format);
     try {
+      await beforeExport(); // the edits of the last 700 ms are in the file too
       const r = await api.post<{ path: string }>(`/api/subtitles/projects/${pid}/export`, { format, folder: folder || null, timestamps });
       setLast(r.path);
       toast({ kind: "success", title: t("subs.exported", { name: r.path.split(/[\\/]/).pop() ?? "" }), action: { label: t("common.showInFolder"), run: () => api.post("/api/system/open", { path: r.path, reveal: true }) } });
@@ -728,6 +762,7 @@ function ExportPanel({ pid, project, burnJob, settingsFolder, onBurn }: { pid: s
   };
   const burn = async () => {
     try {
+      await beforeExport();
       const r = await api.post<{ jobs: Job[] }>(`/api/subtitles/projects/${pid}/burn`, { output_dir: folder || null });
       onBurn(r.jobs[0].id);
     } catch (e: any) {

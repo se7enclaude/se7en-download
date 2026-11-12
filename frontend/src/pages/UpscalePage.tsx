@@ -202,9 +202,14 @@ export function UpscalePage() {
     pickFiles();
   });
 
+  // Each preview request has a number: an answer that arrives after another file was chosen
+  // (or after a newer preview was asked for) is ignored instead of replacing the current one.
+  const previewSeq = useRef(0);
   useEffect(() => {
+    previewSeq.current++;
     setPreview(null);
     setPreviewError(null);
+    setPreviewing(false);
     setRegion(null);
     setZone(null);
     setAt(null);
@@ -283,6 +288,7 @@ export function UpscalePage() {
 
   const runPreview = async () => {
     if (!file) return;
+    const seq = ++previewSeq.current;
     setPreviewing(true);
     setPreviewError(null);
     try {
@@ -292,11 +298,11 @@ export function UpscalePage() {
         region: regionBox, // always explicit: {0,0,1,1} = the whole picture
         at,
       });
-      setPreview(r);
+      if (seq === previewSeq.current) setPreview(r);
     } catch (e) {
-      setPreviewError(e);
+      if (seq === previewSeq.current) setPreviewError(e);
     } finally {
-      setPreviewing(false);
+      if (seq === previewSeq.current) setPreviewing(false);
     }
   };
   useKey("ctrl+p", (e) => {

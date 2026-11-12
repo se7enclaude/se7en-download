@@ -434,7 +434,8 @@ def create_app(services: Services) -> FastAPI:
     @app.post("/api/extract-urls")
     async def extract(body: TextBody):
         urls = extract_urls(body.text)[:1000]
-        return {"urls": [registry.detect(u) for u in urls]}
+        # ~4 ms per link: off the event loop, the rest of the app keeps answering meanwhile
+        return {"urls": await run_in_threadpool(lambda: [registry.detect(u) for u in urls])}
 
     @app.post("/api/analyze")
     async def analyze(body: UrlBody):
@@ -479,6 +480,7 @@ def create_app(services: Services) -> FastAPI:
         s = S.settings.get()
         preset = S.db.get_preset(body.preset_id) if body.preset_id else None
         created = []
+        pending_thumbs: list[tuple[str, str]] = []
         for item in body.items:
             base = {"mode": s.download.default_mode, "quality": s.download.default_quality,
                     "container": s.download.default_container, "vcodec": s.download.default_video_codec,
@@ -489,9 +491,20 @@ def create_app(services: Services) -> FastAPI:
                          "platform_name": item.platform_name, "title": item.title, "entry_count": item.entry_count})
             if auto:
                 opts["preset"] = auto["name"]
-            thumb = await run_in_threadpool(thumbs.cache_remote, item.thumbnail) if item.thumbnail else None
-            created.append(S.jobs.add("download", item.url, opts, title=item.title, platform=item.platform,
-                                      thumbnail=thumb, priority=body.priority))
+            # Thumbnails are fetched afterwards: a playlist of 200 links would otherwise wait for
+            # 200 downloads one after the other before the first task even exists.
+            job = S.jobs.add("download", item.url, opts, title=item.title, platform=item.platform,
+                             thumbnail=None, priority=body.priority)
+            created.append(job)
+            if item.thumbnail:
+                pending_thumbs.append((job["id"], item.thumbnail))
+        if pending_thumbs:
+            def fetch_thumbs() -> None:
+                for job_id, url in pending_thumbs:
+                    key = thumbs.cache_remote(url)
+                    if key:
+                        S.jobs.set_thumbnail(job_id, key)
+            threading.Thread(target=fetch_thumbs, name="job-thumbnails", daemon=True).start()
         return {"jobs": created}
 
     # -------------------------------------------------------- jobs

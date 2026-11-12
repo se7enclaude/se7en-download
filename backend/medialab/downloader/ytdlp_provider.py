@@ -266,6 +266,7 @@ class YtDlpProvider(SourceProvider):
         job_root = Path(ctx.temp_dir)
         if job_root.anchor.lower() != out_root.anchor.lower():
             job_root = out_root / ".medialab-parts" / ctx.job_id  # same drive = instant publish
+            ctx.remember({"_parts_dir": str(job_root)})  # removed when the task is canceled or removed
         stage, temp_dir = job_root / "out", job_root / "parts"
         stage.mkdir(parents=True, exist_ok=True)
         temp_dir.mkdir(parents=True, exist_ok=True)
@@ -418,9 +419,16 @@ class YtDlpProvider(SourceProvider):
                 if _has_cause(e, Canceled) or ctx.cancel.is_set():
                     raise Canceled() from e
                 raise classify(_error_text(e, logger)) from e
+            except yt_dlp.utils.YoutubeDLError as e:
+                # e.g. UnavailableVideoError: a pause/cancel removed the fragment being written.
+                if _has_cause(e, Canceled) or ctx.cancel.is_set():
+                    raise Canceled() from e
+                raise classify(_error_text(e, logger)) from e
             except MediaLabError:
                 raise
             except OSError as e:
+                if ctx.cancel.is_set():
+                    raise Canceled() from e
                 raise classify(e) from e
 
         if info is None:
@@ -500,7 +508,9 @@ class YtDlpProvider(SourceProvider):
             try:
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=True) or {}
-            except yt_dlp.utils.DownloadError as e:
+            except yt_dlp.utils.YoutubeDLError as e:
+                if _has_cause(e, Canceled) or ctx.cancel.is_set():
+                    raise Canceled() from e
                 raise classify(_error_text(e, logger)) from e
         images = [f for f in stage.rglob("*") if f.is_file() and f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")]
         if not images:

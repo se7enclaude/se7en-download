@@ -53,6 +53,8 @@ class JobContext:
     temp_dir: Path
     attempt: int
     strategy: dict
+    # remember({"_key": value}): stored in the task options, found again after a pause or a retry
+    remember: Callable[[dict], None] = field(default=lambda _values: None)
 
 
 class JobManager:
@@ -181,6 +183,13 @@ class JobManager:
                 self.db.delete_job(job_id)
         bus.publish("job_removed", {"id": job_id})
 
+    def set_thumbnail(self, job_id: str, key: str) -> None:
+        """Thumbnail fetched after the task was created (never replaces one already set)."""
+        job = self.db.get_job(job_id)
+        if job and not job.get("thumbnail"):
+            self.db.update_job(job_id, thumbnail=key)
+            self._emit(job_id)
+
     def set_priority(self, job_id: str, priority: int) -> dict:
         self.db.update_job(job_id, priority=max(-10, min(10, int(priority))))
         self._emit(job_id)
@@ -303,15 +312,27 @@ class JobManager:
             self.db.update_job(job_id, status=status)
             self._emit(job_id)
 
+        def remember(values: dict) -> None:
+            cur = self.db.get_job(job_id)
+            if cur:
+                self.db.update_job(job_id, options={**(cur.get("options") or {}), **values})
+
         strategy = (job.get("options") or {}).get("_strategy") or {}
         ctx = JobContext(job=job, cancel=rt.cancel, progress=progress, set_status=set_status,
-                         temp_dir=temp_dir, attempt=attempt, strategy=strategy)
+                         temp_dir=temp_dir, attempt=attempt, strategy=strategy, remember=remember)
         try:
             result = worker(job, ctx)
             self._complete(job_id, result)
         except Canceled:
             self._stopped(job_id, rt.reason)
         except BaseException as e:  # noqa: BLE001 — every failure must be reported, never swallowed
+            if rt.cancel.is_set():
+                # Paused / canceled / removed: what the interruption broke (a fragment that vanished,
+                # a pipe closed…) is not a failure — never an automatic retry the user did not ask for.
+                log.info("Job %s stopped (%s) — %s: %s", job_id, rt.reason, type(e).__name__, e,
+                         extra={"job_id": job_id})
+                self._stopped(job_id, rt.reason)
+                return
             err = classify(e)
             if not isinstance(e, MediaLabError):
                 log.error("Job %s crashed: %s\n%s", job_id, e, traceback.format_exc(), extra={"job_id": job_id})
@@ -421,6 +442,17 @@ class JobManager:
     def _cleanup_temp(self, job_id: str) -> None:
         shutil.rmtree(paths().temp / "jobs" / job_id, ignore_errors=True)
         shutil.rmtree(paths().checkpoints / job_id, ignore_errors=True)
+        # Partial files staged next to the destination (<output>\.medialab-parts\<id>, another drive).
+        job = self.db.get_job(job_id)
+        parts = (job.get("options") or {}).get("_parts_dir") if job else None
+        if parts:
+            p = Path(parts)
+            if p.name == job_id and p.parent.name == ".medialab-parts":  # never anything else
+                shutil.rmtree(p, ignore_errors=True)
+                try:
+                    p.parent.rmdir()  # only when empty (other tasks may still use it)
+                except OSError:
+                    pass
 
     def _emit(self, job_id: str) -> None:
         job = self.db.get_job(job_id)

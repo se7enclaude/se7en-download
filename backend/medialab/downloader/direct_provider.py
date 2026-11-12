@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import mimetypes
-import os
 import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any
@@ -53,6 +53,29 @@ def _kind_from_ctype(ctype: str) -> str | None:
     for k in ("image", "video", "audio"):
         if ctype.startswith(k + "/"):
             return k
+    return None
+
+
+# Content-Type -> extension, for links without one (mimetypes alone gives odd ones: .jpe, .m1v…)
+CTYPE_EXT = {"image/jpeg": ".jpg", "image/jpg": ".jpg", "image/png": ".png", "image/webp": ".webp",
+             "image/gif": ".gif", "image/avif": ".avif", "image/heic": ".heic", "image/bmp": ".bmp",
+             "image/tiff": ".tif", "video/mp4": ".mp4", "video/webm": ".webm", "video/quicktime": ".mov",
+             "video/x-matroska": ".mkv", "video/x-msvideo": ".avi", "video/x-m4v": ".m4v",
+             "audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/mp4": ".m4a", "audio/x-m4a": ".m4a",
+             "audio/aac": ".aac", "audio/flac": ".flac", "audio/x-flac": ".flac", "audio/wav": ".wav",
+             "audio/x-wav": ".wav", "audio/wave": ".wav", "audio/ogg": ".ogg", "audio/opus": ".opus",
+             "audio/webm": ".webm"}
+
+
+def ext_from_ctype(ctype: str | None) -> str | None:
+    """Extension for a Content-Type (None when unknown or not a media type)."""
+    ctype = (ctype or "").split(";")[0].strip().lower()
+    if not ctype:
+        return None
+    if ctype in CTYPE_EXT:
+        return CTYPE_EXT[ctype]
+    if _kind_from_ctype(ctype):
+        return mimetypes.guess_extension(ctype)
     return None
 
 
@@ -123,12 +146,8 @@ class DirectProvider(SourceProvider):
         folder.mkdir(parents=True, exist_ok=True)
         name = unquote(Path(urlparse(url).path).name) or "download"
         stem = sanitize_component(options.get("title") or Path(name).stem, 150)
-        ext = Path(name).suffix or ".bin"
-        dest = folder / f"{stem}{ext}"
-        n = 1
-        while dest.exists():
-            dest = folder / f"{stem} ({n}){ext}"
-            n += 1
+        ext = Path(name).suffix  # no extension in the link: the server's Content-Type decides (below)
+        ctype = None
         part = ctx.temp_dir / f"{ctx.job_id}.part"
         ctx.temp_dir.mkdir(parents=True, exist_ok=True)
         headers = {"User-Agent": UA, **referer_headers(options.get("referer"))}
@@ -149,6 +168,7 @@ class DirectProvider(SourceProvider):
                         if r.status_code >= 400:
                             raise MediaLabError("http_error", f"The server answered HTTP {r.status_code}.",
                                                 "The link may have expired.", r.status_code >= 500)
+                        ctype = r.headers.get("content-type")
                         if done and r.status_code != 206:
                             done = 0  # server ignored Range: restart
                         total = int(r.headers.get("content-length") or 0) + done or None
@@ -175,7 +195,16 @@ class DirectProvider(SourceProvider):
             except (httpx.HTTPError, OSError) as e:
                 raise classify(e) from e
             break
-        os.replace(part, dest)
+        ext = ext or ext_from_ctype(ctype) or ".bin"
+        dest = folder / f"{stem}{ext}"
+        n = 1
+        while dest.exists():
+            dest = folder / f"{stem} ({n}){ext}"
+            n += 1
+        try:
+            shutil.move(str(part), str(dest))  # works across drives too (os.replace: WinError 17)
+        except OSError as e:
+            raise classify(e) from e
         return DownloadResult(file_path=str(dest), title=stem, platform="direct", size=dest.stat().st_size,
                               thumbnail=url if _ext_kind(url) == "image" else None,
                               format=ext.lstrip(".").upper(), meta={"platform_name": domain(url)})

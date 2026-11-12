@@ -75,9 +75,13 @@ export function TrimPage() {
     }
     setSegs([{ id: segSeq++, start: 0, end: file.duration }]);
     setActive(0);
-    api.get<{ peaks: number[] }>(`/api/media/waveform?path=${encodeURIComponent(file.path)}&buckets=1400`).then((r) => setPeaks(r.peaks)).catch(() => undefined);
+    let current = true; // a slow waveform of the previous file must not land on this one
+    api.get<{ peaks: number[] }>(`/api/media/waveform?path=${encodeURIComponent(file.path)}&buckets=1400`).then((r) => current && setPeaks(r.peaks)).catch(() => undefined);
     if (file.kind === "video")
-      api.get<{ frames: { t: number; key: string }[] }>(`/api/media/filmstrip?path=${encodeURIComponent(file.path)}&count=14&height=80`).then((r) => setStrip(r.frames)).catch(() => undefined);
+      api.get<{ frames: { t: number; key: string }[] }>(`/api/media/filmstrip?path=${encodeURIComponent(file.path)}&count=14&height=80`).then((r) => current && setStrip(r.frames)).catch(() => undefined);
+    return () => {
+      current = false;
+    };
   }, [file?.path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // waveform drawing

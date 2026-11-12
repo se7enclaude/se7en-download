@@ -20,13 +20,13 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { api, thumbUrl } from "../api/client";
 import type { Job } from "../api/types";
 import { Badge, Button, Empty, ErrorAlert, PageHead, PlatformChip, Progress, Segmented, StatusBadge, Thumb } from "../components/ui";
 import { useT } from "../i18n";
 import { bytes, eta, speed } from "../lib/format";
-import { useApp } from "../store/app";
+import { flushJobUpdates, useApp } from "../store/app";
 
 type Filter = "all" | "download" | "upscale" | "tools";
 const FILTER_KINDS: Record<Filter, string[] | null> = { all: null, download: ["download"], upscale: ["upscale"], tools: ["convert", "trim", "studio", "subtitles"] };
@@ -50,9 +50,21 @@ export function QueuePage() {
   const totalSpeed = all.filter((j) => j.status === "downloading").reduce((a, j) => a + (j.progress.speed || 0), 0);
 
   const bulk = async (action: string) => {
-    const r = await api.post<{ count: number }>("/api/jobs-bulk", { action, kind: FILTER_KINDS[filter]?.join(",") ?? null });
+    const kinds = FILTER_KINDS[filter];
+    const r = await api.post<{ count: number }>("/api/jobs-bulk", { action, kind: kinds?.join(",") ?? null });
+    if (action === "clear_finished") {
+      // one update for the whole list (instead of one per removed task)
+      flushJobUpdates();
+      const cur = useApp.getState().jobs;
+      const next = Object.fromEntries(
+        Object.entries(cur).filter(([, j]) => !(["completed", "canceled"].includes(j.status) && (!kinds || kinds.includes(j.kind)))),
+      );
+      if (Object.keys(next).length !== Object.keys(cur).length) useApp.setState({ jobs: next });
+    }
     toast({ kind: "info", title: t(`queue.bulk.${action}`, { n: r.count }) });
   };
+  // Layout animations measure every row on each render: only on short lists.
+  const animateLayout = list.length <= 50;
 
   return (
     <div className="page-inner">
@@ -96,7 +108,7 @@ export function QueuePage() {
         <div>
           <AnimatePresence initial={false}>
             {list.map((j, i) => (
-              <motion.div key={j.id} className="job-wrap" layout initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0, transition: { delay: Math.min(i, 10) * 0.06, duration: 0.5, ease: [0.16, 1, 0.3, 1] } }} exit={{ opacity: 0, height: 0 }}>
+              <motion.div key={j.id} className="job-wrap" layout={animateLayout} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0, transition: { delay: Math.min(i, 10) * 0.06, duration: 0.5, ease: [0.16, 1, 0.3, 1] } }} exit={{ opacity: 0, height: 0 }}>
                 <JobRow job={j} index={i + 1} />
               </motion.div>
             ))}
@@ -116,7 +128,8 @@ function Stat({ label, value, color }: { label: string; value: React.ReactNode; 
   );
 }
 
-export function JobRow({ job: j, index }: { job: Job; index: number }) {
+// memo: a progress update re-renders only the row of the task that moved
+export const JobRow = memo(function JobRow({ job: j, index }: { job: Job; index: number }) {
   const t = useT();
   const p = j.progress || {};
   const act = (a: string, value?: unknown) => api.post(`/api/jobs/${j.id}/${a}`, value !== undefined ? { value } : {});
@@ -243,4 +256,4 @@ export function JobRow({ job: j, index }: { job: Job; index: number }) {
       </div>
     </div>
   );
-}
+});

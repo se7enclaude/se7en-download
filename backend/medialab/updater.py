@@ -295,6 +295,7 @@ class Updater:
         """Remember the version that runs; when it differs from the previous launch, the interface shows once
         what changed. Copies older than this mechanism have no marker: a settings file that existed before
         this process started means se7en was already installed (an update, not a first install)."""
+        self.prune_downloads()
         marker = paths().data / "version.txt"
         try:
             prev = marker.read_text("utf-8").strip() if marker.exists() else None
@@ -313,6 +314,30 @@ class Updater:
             from .changelog import since
             log.info("se7en updated: %s -> %s", prev, __version__)
             self.state = {**self.state, "updated_from": prev, "changes": since(prev, __version__)}
+
+    def prune_downloads(self) -> int:
+        """Delete installers already installed (version <= the one running) and interrupted downloads.
+
+        Each update leaves its installer (~100 MB) in data/updates: without this they pile up.
+        Only se7en's own files are touched; a file still in use (installer finishing) stays for next time."""
+        folder = paths().data / "updates"
+        if not folder.is_dir():
+            return 0
+        n = 0
+        for f in folder.iterdir():
+            if not f.is_file():
+                continue
+            m = re.fullmatch(r"se7en-(?:Portable-)?Update-(\d+(?:\.\d+){1,3})\.(?:exe|zip)", f.name, re.I)
+            old = bool(m) and not is_newer(m.group(1), __version__)
+            if old or (f.name.lower().startswith("se7en") and f.suffix.lower() == ".part"):
+                try:
+                    f.unlink()
+                    n += 1
+                except OSError as e:
+                    log.info("Old update file kept (%s): %s", e, f.name)
+        if n:
+            log.info("Removed %d old update file(s)", n)
+        return n
 
     def seen(self) -> dict:
         self.state = {k: v for k, v in self.state.items() if k not in ("updated_from", "changes")}

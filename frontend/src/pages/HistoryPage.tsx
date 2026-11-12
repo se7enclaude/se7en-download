@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { File, FolderOpen, History, LayoutGrid, List, PlayCircle, RefreshCcw, RotateCcw, Scissors, Search, Sparkles, Trash2 } from "lucide-react";
-import { ReactNode, useEffect, useMemo, useState } from "react";
+import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, thumbUrl } from "../api/client";
 import type { HistoryItem } from "../api/types";
 import { Badge, Button, Empty, Modal, PageHead, PlatformChip, Segmented, Switch, Thumb } from "../components/ui";
@@ -32,9 +32,13 @@ export function HistoryPage() {
   const [deleteFile, setDeleteFile] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
+  // only the answer to the latest search is shown (an older, slower one must not replace it)
+  const loadSeq = useRef(0);
   const load = async () => {
+    const seq = ++loadSeq.current;
     const params = new URLSearchParams({ q, kind, platform });
     const r = await api.get<{ items: HistoryItem[] }>(`/api/history?${params}`);
+    if (seq !== loadSeq.current) return;
     setItems(r.items);
     setLoading(false);
   };

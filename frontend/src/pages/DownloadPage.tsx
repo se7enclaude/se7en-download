@@ -330,13 +330,16 @@ export function DownloadPage() {
     if (urls.length === 1) analyze(urls[0]);
   }, [pendingUrls]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The clipboard is read when the window gets the focus, not at every key typed in the box.
+  const textRef = useRef(text);
+  textRef.current = text;
   useEffect(() => {
     if (!settings?.general.clipboard_watch) return;
     const check = async () => {
       try {
         const r = await api.get<{ urls: string[] }>("/api/system/clipboard");
         const u = r.urls[0];
-        if (u && u !== lastClip.current && !text.includes(u)) {
+        if (u && u !== lastClip.current && !textRef.current.includes(u)) {
           lastClip.current = u;
           setClip(u);
         }
@@ -347,7 +350,7 @@ export function DownloadPage() {
     check();
     window.addEventListener("focus", check);
     return () => window.removeEventListener("focus", check);
-  }, [settings?.general.clipboard_watch, text]);
+  }, [settings?.general.clipboard_watch]);
 
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     const pasted = e.clipboardData.getData("text");

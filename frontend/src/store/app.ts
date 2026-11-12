@@ -199,6 +199,13 @@ export const useApp = create<AppState>((set, get) => ({
   upsertJob: (j) => set({ jobs: { ...get().jobs, [j.id]: j } }),
 }));
 
+/** Number of tasks in these states: a selector returning a number re-renders only when it changes. */
+export function countJobs(jobs: Record<string, Job>, statuses: string[]): number {
+  let n = 0;
+  for (const id in jobs) if (statuses.includes(jobs[id].status)) n++;
+  return n;
+}
+
 // ---------------------------------------------------------------- event wiring
 type Translate = (key: string, vars?: Record<string, string | number>) => string;
 let translate: Translate = (k) => k;
@@ -206,28 +213,58 @@ export function setTranslator(t: Translate): void {
   translate = t;
 }
 
+// Progress arrives several times a second per running task: each one recreated `jobs` and re-rendered
+// everything that reads it. They are grouped into a single update per frame (removals too: « Vider
+// les terminés » removes dozens of tasks at once). A full "job" event first applies what is pending.
+const pendingProgress = new Map<string, { status?: string; progress: Job["progress"] }>();
+const pendingRemoved = new Set<string>();
+let flushScheduled = false;
+
+export function flushJobUpdates(): void {
+  flushScheduled = false;
+  if (!pendingProgress.size && !pendingRemoved.size) return;
+  const jobs = useApp.getState().jobs;
+  let next: Record<string, Job> | null = null;
+  for (const [id, u] of pendingProgress) {
+    const cur = (next ?? jobs)[id];
+    if (!cur) continue;
+    next ??= { ...jobs };
+    next[id] = { ...cur, status: (u.status as Job["status"]) || cur.status, progress: u.progress };
+  }
+  for (const id of pendingRemoved) {
+    if (!(id in (next ?? jobs))) continue;
+    next ??= { ...jobs };
+    delete next[id];
+  }
+  pendingProgress.clear();
+  pendingRemoved.clear();
+  if (next) useApp.setState({ jobs: next });
+}
+
+function scheduleFlush(): void {
+  if (flushScheduled) return;
+  flushScheduled = true;
+  // requestAnimationFrame does not run while the window is hidden: a timer then
+  if (typeof requestAnimationFrame === "function" && typeof document !== "undefined" && !document.hidden) requestAnimationFrame(flushJobUpdates);
+  else setTimeout(flushJobUpdates, 100);
+}
+
 function onEvent(ev: AppEvent): void {
+  if (ev.type === "job" || ev.type === "queue_reordered") flushJobUpdates(); // never overwritten by older progress
   const s = useApp.getState();
   switch (ev.type) {
     case "job":
       s.upsertJob(ev.data as Job);
       break;
     case "job_progress": {
-      const cur = s.jobs[ev.data.id];
-      if (cur) {
-        useApp.setState({
-          jobs: {
-            ...s.jobs,
-            [cur.id]: { ...cur, status: ev.data.status || cur.status, progress: ev.data.progress },
-          },
-        });
-      }
+      pendingProgress.set(ev.data.id, { status: ev.data.status, progress: ev.data.progress });
+      scheduleFlush();
       break;
     }
     case "job_removed": {
-      const next = { ...s.jobs };
-      delete next[ev.data.id];
-      useApp.setState({ jobs: next });
+      pendingProgress.delete(ev.data.id);
+      pendingRemoved.add(ev.data.id);
+      scheduleFlush();
       break;
     }
     case "queue_reordered":

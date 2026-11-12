@@ -33,6 +33,8 @@ class DownloadContext:
     temp_dir: Path
     attempt: int = 0
     strategy: dict[str, Any] = field(default_factory=dict)
+    # remember({"_key": value}): stored in the task options (e.g. a staging folder to clean up later)
+    remember: Callable[[dict[str, Any]], None] = field(default=lambda _values: None)
 
 
 @dataclass

@@ -42,23 +42,32 @@ def make_download_worker(settings: SettingsStore):
     def worker(job: dict, jctx: JobContext) -> dict:
         s = settings.get()
         opts = job.get("options") or {}
-        provider = registry.get(opts.get("provider") or "ytdlp")
-        jctx.progress({"stage": "downloading", "label": "Connecting…", "percent": None, "speed": 0,
-                       "attempt": jctx.attempt + 1, "strategy": (jctx.strategy or {}).get("label")})
-        dctx = DownloadContext(job_id=job["id"], settings=s, cancel=jctx.cancel, progress=jctx.progress,
-                               temp_dir=jctx.temp_dir, attempt=jctx.attempt, strategy=jctx.strategy)
-        res = provider.download(job["source"], opts, dctx)
-        out = {
-            "file_path": res.file_path, "title": res.title or job.get("title"), "platform": res.platform or job.get("platform"),
-            "thumbnail_url": res.thumbnail, "resolution": res.resolution, "format": res.format, "size": res.size,
-            "duration": res.duration, "extra_files": res.extra_files, "meta": res.meta,
-        }
+        # Already downloaded, interrupted while converting (pause, retry): convert the same file,
+        # never download it a second time (that would leave a duplicate next to it).
+        done = opts.get("_downloaded")
+        if isinstance(done, dict) and done.get("file_path") and Path(done["file_path"]).is_file():
+            out = dict(done)
+        else:
+            provider = registry.get(opts.get("provider") or "ytdlp")
+            jctx.progress({"stage": "downloading", "label": "Connecting…", "percent": None, "speed": 0,
+                           "attempt": jctx.attempt + 1, "strategy": (jctx.strategy or {}).get("label")})
+            dctx = DownloadContext(job_id=job["id"], settings=s, cancel=jctx.cancel, progress=jctx.progress,
+                                   temp_dir=jctx.temp_dir, attempt=jctx.attempt, strategy=jctx.strategy,
+                                   remember=jctx.remember)
+            res = provider.download(job["source"], opts, dctx)
+            out = {
+                "file_path": res.file_path, "title": res.title or job.get("title"), "platform": res.platform or job.get("platform"),
+                "thumbnail_url": res.thumbnail, "resolution": res.resolution, "format": res.format, "size": res.size,
+                "duration": res.duration, "extra_files": res.extra_files, "meta": res.meta,
+            }
+            if output_format.wanted_target(opts, s.download):
+                jctx.remember({"_downloaded": out})
         # The format chosen when pasting the link (MP3, FLAC, MKV…): convert what did not arrive in it.
-        conv = output_format.ensure(res.file_path, opts, s, jctx.cancel, jctx.progress)
+        conv = output_format.ensure(out["file_path"], opts, s, jctx.cancel, jctx.progress)
         if conv:
             out.update(file_path=conv["file_path"], size=conv["size"], format=conv["format"],
-                       resolution=conv.get("resolution") or res.resolution,
-                       meta={**(res.meta or {}), "converted_to": conv["meta"].get("target")})
+                       resolution=conv.get("resolution") or out.get("resolution"),
+                       meta={**(out.get("meta") or {}), "converted_to": conv["meta"].get("target")})
         return out
     return worker
 

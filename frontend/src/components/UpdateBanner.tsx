@@ -4,7 +4,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import type { UpdateState } from "../api/types";
 import { useT } from "../i18n";
-import { useApp } from "../store/app";
+import { countJobs, useApp } from "../store/app";
 import { Button, Modal } from "./ui";
 
 /**
@@ -15,12 +15,11 @@ export function UpdateBanner() {
   const t = useT();
   const u = useApp((s) => s.update);
   const auto = useApp((s) => s.settings?.general.auto_update !== false);
-  const jobs = useApp((s) => s.jobs);
+  const running = useApp((s) => countJobs(s.jobs, ["downloading", "processing", "analyzing"]));
   const [notes, setNotes] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [installing, setInstalling] = useState(false);
   const show = !!u && ["available", "downloading", "ready", "installing"].includes(u.state);
-  const running = Object.values(jobs).filter((j) => ["downloading", "processing", "analyzing"].includes(j.status)).length;
   const pct = u?.total ? Math.min(100, Math.round(((u.downloaded ?? 0) / u.total) * 100)) : null;
 
   const install = async () => {

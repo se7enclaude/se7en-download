@@ -1,8 +1,8 @@
 import clsx from "clsx";
 import { AudioLines, BarChart3, Captions, Copy, Download, History, ListOrdered, PlayCircle, RefreshCcw, Scissors, ScrollText, Settings as SettingsIcon, Sparkles } from "lucide-react";
-import { ReactNode, useMemo } from "react";
+import { ReactNode } from "react";
 import { useT } from "../i18n";
-import { Page, useApp } from "../store/app";
+import { Page, countJobs, useApp } from "../store/app";
 import { Button } from "./ui";
 
 export function Wordmark({ size = 26, onClick }: { size?: number; onClick?: () => void }) {
@@ -32,12 +32,12 @@ export function TopBar({ onLogo }: { onLogo: () => void }) {
   const t = useT();
   const page = useApp((s) => s.page);
   const setPage = useApp((s) => s.setPage);
-  const jobs = useApp((s) => s.jobs);
+  // a number, not the jobs: progress updates no longer re-render the top bar
+  const active = useApp((s) => countJobs(s.jobs, ["waiting", "analyzing", "downloading", "processing"]));
   const hw = useApp((s) => s.hardware);
   const caps = useApp((s) => s.capabilities);
   const connected = useApp((s) => s.connected);
 
-  const active = useMemo(() => Object.values(jobs).filter((j) => ["waiting", "analyzing", "downloading", "processing"].includes(j.status)).length, [jobs]);
   const gpu = hw?.gpus?.[0];
   const aiReady = caps?.backends.some((b) => b.id !== "classic" && b.available);
   const status = !connected
