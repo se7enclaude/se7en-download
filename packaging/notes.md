@@ -1,9 +1,12 @@
-## se7en Download 1.6.0
+## se7en Download 1.6.1
 
-- **Convertir en, juste sous le lien** : choisis MP3, M4A (AAC), OPUS, OGG, FLAC, WAV, ALAC, MP4, MKV, WEBM ou MOV, avec le débit ou la qualité, puis « Télécharger en MP3 ». Ça marche pour un ou plusieurs liens, sans passer par l'analyse, et ton choix est retenu.
-- **Liens directs convertis** : un fichier vidéo ou audio collé directement arrive lui aussi dans le format choisi.
-- **Composants à jour, clairement** : chaque composant affiche « À jour (version X, vérifié le …) » ou « Mise à jour disponible ». Un composant à jour n'est plus jamais retéléchargé, et se7en te prévient quand une nouvelle version de yt-dlp, FFmpeg ou Deno sort.
-- **Corrigé** : une mise à jour de FFmpeg ou de Deno était téléchargée mais pas utilisée ; un ancien yt-dlp pouvait masquer le plus récent ; l'AAC donnait un .m4a mal formé ; certains liens directs (Wikimedia Commons…) échouaient avec « HTTP 403 ».
+- **Corrigé** : mettre en pause, annuler ou supprimer un téléchargement en streaming (HLS/DASH) ne le fait plus passer pour un échec, et il ne repart plus tout seul.
+- **Corrigé** : une conversion « Convertir en » interrompue reprend sans retélécharger le fichier (plus de doublon).
+- **Ménage** : les fichiers temporaires d'un téléchargement annulé sont supprimés, et les anciens installateurs de mise à jour sont nettoyés.
+- **Liens directs** : le bon type de fichier est deviné (plus de « .bin »).
+- **Playlists** : l'ajout est instantané, les miniatures arrivent ensuite.
+- **Sous-titres** : ton travail est enregistré avant la fermeture et avant l'export.
+- **File d'attente** plus légère et plus fluide, même avec beaucoup de téléchargements.
 
 Ton historique et tes réglages sont gardés.
 

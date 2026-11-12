@@ -2,6 +2,22 @@
 from __future__ import annotations
 
 CHANGES: dict[str, dict[str, list[str]]] = {
+    "1.6.1": {
+        "fr": ["Corrigé : mettre en pause, annuler ou supprimer un téléchargement en streaming (HLS/DASH) ne le fait plus passer pour un échec, et il ne repart plus tout seul.",
+               "Corrigé : une conversion « Convertir en » interrompue reprend sans retélécharger le fichier (plus de doublon).",
+               "Les fichiers temporaires d'un téléchargement annulé sont supprimés, et les anciens installateurs de mise à jour sont nettoyés.",
+               "Liens directs : le bon type de fichier est deviné (plus de « .bin »).",
+               "Ajouter une playlist est instantané : les miniatures arrivent ensuite.",
+               "Sous-titres : ton travail est enregistré avant la fermeture et avant l'export.",
+               "La file d'attente est plus légère et plus fluide, même avec beaucoup de téléchargements."],
+        "en": ["Fixed: pausing, cancelling or deleting a streamed download (HLS/DASH) no longer counts as a failure, and it no longer restarts on its own.",
+               "Fixed: an interrupted \"Convert to\" resumes without downloading the file again (no more duplicate).",
+               "Temporary files of a cancelled download are deleted, and old update installers are cleaned up.",
+               "Direct links: the right file type is guessed (no more \".bin\").",
+               "Adding a playlist is instant: thumbnails arrive afterwards.",
+               "Subtitles: your work is saved before closing and before exporting.",
+               "The queue is lighter and smoother, even with many downloads."],
+    },
     "1.6.0": {
         "fr": ["Nouveau : « Convertir en », juste sous le lien. Choisissez MP3, M4A (AAC), OPUS, OGG, FLAC, WAV, ALAC, "
                "MP4, MKV, WEBM ou MOV, avec le débit ou la qualité, puis « Télécharger en MP3 » : sans passer par "
