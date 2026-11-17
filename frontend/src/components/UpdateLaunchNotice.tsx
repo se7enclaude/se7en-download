@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import type { UpdateState } from "../api/types";
 import { useT } from "../i18n";
 import { play } from "../lib/sounds";
-import { useApp } from "../store/app";
+import { countJobs, useApp } from "../store/app";
 import { Button, Modal } from "./ui";
 
 // versions already announced in this session (the window is not shown again when the user chose "Later"),
@@ -22,7 +22,7 @@ export function UpdateLaunchNotice({ blocked }: { blocked: boolean }) {
   const t = useT();
   const u = useApp((s) => s.update);
   const auto = useApp((s) => s.settings?.general.auto_update !== false);
-  const running = useApp((s) => Object.values(s.jobs).filter((j) => ["downloading", "processing", "analyzing"].includes(j.status)).length);
+  const running = useApp((s) => countJobs(s.jobs, ["downloading", "processing", "analyzing"]));
   const [open, setOpen] = useState<"updated" | "available" | null>(null);
   const [installing, setInstalling] = useState(false);
 

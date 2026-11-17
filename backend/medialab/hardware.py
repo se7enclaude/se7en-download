@@ -23,6 +23,31 @@ except Exception:  # pragma: no cover
     pynvml = None
 
 
+def _registry_vram() -> dict[str, int]:
+    """Real video memory per adapter name, in MB. Win32_VideoController.AdapterRAM is a 32-bit number capped
+    at 4 GB: a 16 GB Radeon or Arc was seen as 4 GB and got small, slow tiles."""
+    out: dict[str, int] = {}
+    if sys.platform != "win32":
+        return out
+    try:
+        import winreg
+        base = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, base) as root:
+            for i in range(32):
+                try:
+                    with winreg.OpenKey(root, f"{i:04d}") as k:
+                        name = str(winreg.QueryValueEx(k, "DriverDesc")[0])
+                        size = winreg.QueryValueEx(k, "HardwareInformation.qwMemorySize")[0]
+                        if isinstance(size, bytes):
+                            size = int.from_bytes(size[:8], "little")
+                        out[name] = max(out.get(name, 0), int(size) // (1 << 20))
+                except OSError:
+                    continue
+    except Exception as e:  # noqa: BLE001
+        log.debug("Registry VRAM read failed: %s", e)
+    return out
+
+
 class HardwareMonitor:
     def __init__(self) -> None:
         self._nvml = False
@@ -59,8 +84,10 @@ class HardwareMonitor:
             data = json.loads(out.stdout or "[]")
             if isinstance(data, dict):
                 data = [data]
+            real = _registry_vram()
             self._other_gpus = [
-                {"name": d.get("Name"), "vram_total_mb": (d.get("AdapterRAM") or 0) // (1 << 20),
+                {"name": d.get("Name"),
+                 "vram_total_mb": max(real.get(str(d.get("Name")), 0), (d.get("AdapterRAM") or 0) // (1 << 20)),
                  "driver": d.get("DriverVersion")}
                 for d in data if d.get("Name") and "nvidia" not in d.get("Name", "").lower()
                 and "basic" not in d.get("Name", "").lower()
@@ -118,6 +145,9 @@ class HardwareMonitor:
         if not gpus:
             return None
         g = gpus[0]
+        if g.get("vram_free_mb") is None:
+            # no live reading (AMD / Intel): the card with the most memory, not the integrated chip listed first
+            g = max(gpus, key=lambda x: x.get("vram_total_mb") or 0)
         return g.get("vram_free_mb") or g.get("vram_total_mb")
 
     # ------------------------------------------------------------------

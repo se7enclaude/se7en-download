@@ -208,7 +208,10 @@ class SettingsStore:
             else:
                 self._settings = Settings()
             self.save()
-            return self._settings
+            new = self._settings
+        for cb in list(self._listeners):  # like update(): custom paths, debug mode... follow at once
+            cb(new)
+        return new
 
     def on_change(self, cb) -> None:
         self._listeners.append(cb)

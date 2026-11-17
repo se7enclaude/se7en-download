@@ -60,10 +60,17 @@ def extract_audio(src: Path, dst: Path, duration: float | None, cancel: threadin
                   progress: Callable[[float], None] | None = None) -> Path:
     dst.parent.mkdir(parents=True, exist_ok=True)
     part = dst.with_suffix(".part.wav")
-    ffmpeg.run(["-i", str(src), "-map", "0:a:0", "-vn", "-ac", "1", "-ar", str(SR), "-c:a", "pcm_s16le", str(part)],
-               duration=duration, cancel=cancel, label="subtitle audio",
-               on_progress=(lambda f, _s: progress(f)) if progress else None)
-    os.replace(part, dst)
+    try:
+        # first_pts=0: a sound track that starts late in the file keeps its silence at the start (the subtitles
+        # were early by that much otherwise)
+        ffmpeg.run(["-i", str(src), "-map", "0:a:0", "-vn", "-af", "aresample=async=1:first_pts=0", "-ac", "1",
+                    "-ar", str(SR), "-c:a", "pcm_s16le", str(part)],
+                   duration=duration, cancel=cancel, label="subtitle audio",
+                   on_progress=(lambda f, _s: progress(f)) if progress else None)
+        os.replace(part, dst)
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
     return dst
 
 

@@ -9,6 +9,7 @@ import { useApp } from "../store/app";
 
 type Level = "debug" | "info" | "warning" | "error";
 const ORDER = ["debug", "info", "warning", "error", "critical"];
+const MAX_ROWS = 800;
 
 export function LogsPage() {
   const t = useT();
@@ -22,10 +23,25 @@ export function LogsPage() {
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.get<{ entries: LogEntry[] }>("/api/logs?level=debug").then((r) => setEntries(r.entries));
-    return events.on((ev) => {
-      if (ev.type === "log") setEntries((xs) => (xs.length > 4000 ? [...xs.slice(-3000), ev.data] : [...xs, ev.data]));
+    api.get<{ entries: LogEntry[] }>("/api/logs?level=debug").then((r) => setEntries(r.entries)).catch(() => undefined);
+    // lines arrive by dozens per second in debug mode: they are added four times a second, all at once
+    let buf: LogEntry[] = [];
+    let timer = 0;
+    const flush = () => {
+      timer = 0;
+      const add = buf;
+      buf = [];
+      setEntries((xs) => (xs.length + add.length > 4000 ? [...xs, ...add].slice(-3000) : [...xs, ...add]));
+    };
+    const off = events.on((ev) => {
+      if (ev.type !== "log") return;
+      buf.push(ev.data);
+      if (!timer) timer = window.setTimeout(flush, 250);
     });
+    return () => {
+      off();
+      window.clearTimeout(timer);
+    };
   }, []);
 
   const shown = useMemo(() => {
@@ -37,6 +53,9 @@ export function LogsPage() {
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [shown, follow]);
+
+  // only the latest lines are drawn (thousands of rows made every update slow); the search covers them all
+  const visible = useMemo(() => (shown.length > MAX_ROWS ? shown.slice(-MAX_ROWS) : shown), [shown]);
 
   const counts = useMemo(() => ({ warning: entries.filter((e) => e.level === "warning").length, error: entries.filter((e) => e.level === "error" || e.level === "critical").length }), [entries]);
 
@@ -63,11 +82,11 @@ export function LogsPage() {
         <div className="spacer" />
         <Button size="sm" icon={follow ? <Pause size={14} /> : <Play size={14} />} onClick={() => setFollow(!follow)}>{follow ? t("logs.pause") : t("logs.follow")}</Button>
         <Button size="sm" icon={<Download size={14} />} onClick={() => window.open(mediaUrl("/api/logs/export"), "_blank")}>{t("logs.export")}</Button>
-        <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} onClick={async () => { await api.del("/api/logs"); setEntries([]); }}>{t("common.clear")}</Button>
+        <Button size="sm" variant="ghost" icon={<Trash2 size={14} />} onClick={async () => { await api.del("/api/logs").catch(() => undefined); setEntries([]); }}>{t("common.clear")}</Button>
       </div>
       <div className="logs" ref={box} onWheel={() => box.current && box.current.scrollTop + box.current.clientHeight < box.current.scrollHeight - 30 && setFollow(false)}>
         {shown.length === 0 && <div className="faint" style={{ padding: 20, textAlign: "center" }}>{t("logs.empty")}</div>}
-        {shown.map((e) => (
+        {visible.map((e) => (
           <div key={e.seq} className={`log-line log-${e.level}`}>
             <span className="log-ts">{new Date(e.ts * 1000).toLocaleTimeString(undefined, { hour12: false })}.{String(Math.floor((e.ts % 1) * 1000)).padStart(3, "0")}</span>
             <span className="log-level">{e.level}</span>

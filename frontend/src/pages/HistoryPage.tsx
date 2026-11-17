@@ -1,6 +1,6 @@
 import { motion } from "motion/react";
 import { File, FolderOpen, History, LayoutGrid, List, PlayCircle, RefreshCcw, RotateCcw, Scissors, Search, Sparkles, Trash2 } from "lucide-react";
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, thumbUrl } from "../api/client";
 import type { HistoryItem } from "../api/types";
 import { Badge, Button, Empty, Modal, PageHead, PlatformChip, Segmented, Switch, Thumb } from "../components/ui";
@@ -8,6 +8,7 @@ import { useT } from "../i18n";
 import { bytes, duration, relative } from "../lib/format";
 import { useApp } from "../store/app";
 
+const PAGE_SIZE = 300;
 type Kind = "" | "download" | "upscale" | "convert" | "trim" | "studio" | "subtitles";
 const KIND_ICON: Record<string, ReactNode> = { upscale: <Sparkles size={20} />, convert: <RefreshCcw size={20} />, trim: <Scissors size={20} /> };
 
@@ -34,35 +35,55 @@ export function HistoryPage() {
 
   // only the answer to the latest search is shown (an older, slower one must not replace it)
   const loadSeq = useRef(0);
-  const load = async () => {
+  const [more, setMore] = useState(false); // older entries exist beyond the ones loaded
+  const fail = (e: any) => toast({ kind: "error", title: e?.message ?? String(e), body: e?.hint });
+  const load = async (offset = 0) => {
     const seq = ++loadSeq.current;
-    const params = new URLSearchParams({ q, kind, platform });
-    const r = await api.get<{ items: HistoryItem[] }>(`/api/history?${params}`);
-    if (seq !== loadSeq.current) return;
-    setItems(r.items);
-    setLoading(false);
+    const params = new URLSearchParams({ q, kind, platform, limit: String(PAGE_SIZE), offset: String(offset) });
+    try {
+      const r = await api.get<{ items: HistoryItem[] }>(`/api/history?${params}`);
+      if (seq !== loadSeq.current) return;
+      setItems((xs) => (offset ? [...xs, ...r.items] : r.items));
+      setMore(r.items.length === PAGE_SIZE);
+      // the platform chips come from the unfiltered list: they stay there once one is chosen
+      if (!platform && !offset) setKnownPlatforms(platformsOf(r.items));
+      else if (!platform) setKnownPlatforms((p) => [...new Map([...p, ...platformsOf(r.items)]).entries()]);
+    } catch (e) {
+      if (seq === loadSeq.current) fail(e);
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
+    }
   };
   useEffect(() => {
-    const h = window.setTimeout(load, 150);
+    const h = window.setTimeout(() => load(), 150);
     return () => window.clearTimeout(h);
   }, [q, kind, platform, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const platforms = useMemo(() => {
+  const platformsOf = (list: HistoryItem[]) => {
     const m = new Map<string, string>();
-    items.forEach((i) => i.platform && m.set(i.platform, i.kind !== "download" ? t(`queue.kindLabel.${i.kind}`) : i.meta?.platform_name || i.platform));
+    list.forEach((i) => i.platform && m.set(i.platform, i.kind !== "download" ? t(`queue.kindLabel.${i.kind}`) : i.meta?.platform_name || i.platform));
     return [...m.entries()];
-  }, [items, t]);
+  };
+  const [platforms, setKnownPlatforms] = useState<[string, string][]>([]);
 
   const open = (i: HistoryItem, reveal: boolean) =>
     api.post("/api/system/open", { path: i.file_path, reveal }).catch((e) => toast({ kind: "error", title: e.message, body: e.hint }));
   const again = async (i: HistoryItem) => {
-    await api.post(`/api/history/${i.id}/again`);
-    toast({ kind: "success", title: t("history.requeued"), action: { label: t("nav.queue"), run: () => setPage("queue") } });
+    try {
+      await api.post(`/api/history/${i.id}/again`);
+      toast({ kind: "success", title: t("history.requeued"), action: { label: t("nav.queue"), run: () => setPage("queue") } });
+    } catch (e) {
+      fail(e);
+    }
   };
   const remove = async () => {
     if (!confirm) return;
-    await api.del(`/api/history/${confirm.id}?delete_file=${deleteFile}`);
-    setItems((xs) => xs.filter((x) => x.id !== confirm.id));
+    try {
+      await api.del(`/api/history/${confirm.id}?delete_file=${deleteFile}`);
+      setItems((xs) => xs.filter((x) => x.id !== confirm.id));
+    } catch (e) {
+      fail(e);
+    }
     setConfirm(null);
   };
 
@@ -96,7 +117,7 @@ export function HistoryPage() {
             { value: "subtitles", label: t("nav.subtitles") },
           ]}
         />
-        {platforms.length > 1 && (
+        {(platforms.length > 1 || !!platform) && (
           <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
             {platforms.map(([key, name]) => (
               <button key={key} className={"chip " + (platform === key ? "on" : "")} onClick={() => setPlatform(platform === key ? "" : key)}>
@@ -173,6 +194,11 @@ export function HistoryPage() {
           ))}
         </div>
       )}
+      {more && (
+        <div className="row" style={{ justifyContent: "center", marginTop: 16 }}>
+          <Button size="sm" variant="outline" onClick={() => load(items.length)}>{t("history.more")}</Button>
+        </div>
+      )}
 
       <Modal
         open={!!confirm}
@@ -207,8 +233,13 @@ export function HistoryPage() {
             <Button
               variant="primary"
               onClick={async () => {
-                await api.del("/api/history");
-                setItems([]);
+                try {
+                  await api.del("/api/history");
+                  setItems([]);
+                  setMore(false);
+                } catch (e) {
+                  fail(e);
+                }
                 setConfirmClear(false);
               }}
             >

@@ -87,6 +87,9 @@ def session(path: Path, device: str = "auto"):
         log.info("AI model %s loaded on %s in %.1fs", path.name, "GPU (DirectML)" if kind == "dml" else "CPU",
                  time.perf_counter() - t0)
         _sessions[key] = (sess, threading.Lock())
+        # DirectML refused this model: remember the CPU session under the GPU key too, or every next image
+        # tried DirectML again and reloaded the model twice
+        _sessions.setdefault((str(path), "dml" if uses_gpu(device) else "cpu"), _sessions[key])
         _last_used[0] = time.monotonic()
         return _sessions[key]
 

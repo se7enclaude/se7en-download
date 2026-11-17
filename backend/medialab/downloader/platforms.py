@@ -46,11 +46,14 @@ def identify(extractor_key: str | None, url: str | None = None) -> tuple[str, st
     if k in ("", "generic", "html5mediaembed"):
         host = domain(url)
         if host:
-            base = host.split(".")[-2] if host.count(".") >= 1 else host
+            parts = host.split(".")
+            # bbc.co.uk -> "bbc" (not "co")
+            two = len(parts) >= 3 and parts[-2] in ("co", "com", "org", "net", "gov", "ac", "edu") and len(parts[-1]) == 2
+            base = parts[-3] if two else (parts[-2] if len(parts) >= 2 else host)
             return base.lower(), base.capitalize()
         return "web", "Web"
     clean = re.sub(r"(ie|tab|playlist|user|channel|vod|clips?|live|post|shorts?|search)$", "", k) or k
-    return clean, (extractor_key or clean).rstrip("IE")
+    return clean, (extractor_key or clean).removesuffix("IE")
 
 
 def domain(url: str | None) -> str:

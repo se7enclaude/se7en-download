@@ -305,6 +305,9 @@ def _convert_av(src: Path, dst: Path, target: Target, opts: dict, info: dict, ca
             raise MediaLabError("no_audio_stream", "This file contains no sound.",
                                 "Choose a video or image format instead.")
         args, meta = _audio_only_args(src, target, opts, info)
+    if target.id == "gif":
+        _gif(src, dst, opts, info, duration, cancel, progress, label)
+        return meta
     size_goal = float(opts.get("target_size_mb") or 0)
     for attempt in range(3):
         try:
@@ -322,10 +325,37 @@ def _convert_av(src: Path, dst: Path, target: Target, opts: dict, info: dict, ca
             break
         # Over budget (rare with VBR): aim lower and redo.
         ratio = (size_goal * 1_000_000) / dst.stat().st_size * 0.95
-        log.info("Target size missed (%.1f MB), retrying with %.0f%% bitrate", dst.stat().st_size / 1e6, ratio * 100)
-        args, meta = (_video_args if target.kind == "video" else _audio_only_args)(src, target, {**opts, "_bitrate_scale": (opts.get("_bitrate_scale") or 1) * ratio}, info)
         opts = {**opts, "_bitrate_scale": (opts.get("_bitrate_scale") or 1) * ratio}
+        new_args, new_meta = (_video_args if target.kind == "video" else _audio_only_args)(src, target, opts, info)
+        if new_args == args:
+            break  # this format has no bitrate to lower (ProRes, lossless audio...): the same encode again is useless
+        log.info("Target size missed (%.1f MB), retrying with %.0f%% bitrate", dst.stat().st_size / 1e6, ratio * 100)
+        args, meta = new_args, new_meta
     return meta
+
+
+def _gif_chain(opts: dict, info: dict) -> tuple[str, int]:
+    width = int(opts.get("gif_width") or 480)
+    width = min(width, info.get("width") or width)
+    return f"fps={_fps(opts) or 15},scale={width}:-1:flags=lanczos", width
+
+
+def _gif(src: Path, dst: Path, opts: dict, info: dict, duration: float, cancel: threading.Event,
+         progress: Progress, label: str) -> None:
+    """Video -> GIF in two passes (colour palette, then the GIF). One pass kept every frame in memory until the
+    palette was ready: about 9 MB per second of video, several GB for a few minutes."""
+    chain, _w = _gif_chain(opts, info)
+    palette = dst.with_name(dst.name + ".palette.png")
+    try:
+        _run(["-i", str(src), "-map", "0:V:0", "-vf", f"{chain},palettegen=stats_mode=diff", "-frames:v", "1",
+              "-update", "1", "-f", "image2", str(palette)], duration, cancel,
+             lambda f, lbl, eta: progress(f * 0.4, lbl, None), label)
+        _run(["-i", str(src), "-i", str(palette), "-filter_complex",
+              f"[0:V:0]{chain}[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle",
+              "-an", "-loop", "0", "-f", "gif", str(dst)], duration, cancel,
+             lambda f, lbl, eta: progress(0.4 + f * 0.6, lbl, eta), label)
+    finally:
+        palette.unlink(missing_ok=True)
 
 
 def _run(args: list[str], duration: float, cancel: threading.Event, progress: Progress, label: str) -> None:
@@ -348,13 +378,13 @@ def _video_args(src: Path, target: Target, opts: dict, info: dict) -> tuple[list
     args = ["-i", str(src)]
     meta: dict[str, Any] = {}
     w, h = info.get("width"), info.get("height")
-    if target.id == "gif":
-        fps = _fps(opts) or 15
-        width = int(opts.get("gif_width") or 480)
-        width = min(width, w or width)
-        chain = (f"fps={fps},scale={width}:-1:flags=lanczos,split[a][b];[a]palettegen=stats_mode=diff[p];"
-                 f"[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle")
-        args += ["-filter_complex", f"[0:V:0]{chain}", "-an", "-loop", "0", "-f", "gif"]
+    if abs(int(info.get("rotation") or 0)) in (90, 270):
+        # ffmpeg turns the picture before the filters: sizes are those of the picture as displayed
+        # (a phone video limited to 720p came out 406×720)
+        w, h = h, w
+        info = {**info, "width": w, "height": h}
+    if target.id == "gif":  # the commands are built by _gif (two passes)
+        _chain, width = _gif_chain(opts, info)
         meta["resolution"] = f"{width}×{round(width * h / w) if w and h else '?'}"
         return args, meta
 
@@ -369,13 +399,18 @@ def _video_args(src: Path, target: Target, opts: dict, info: dict) -> tuple[list
         "webm": src_v in ("vp9", "vp8", "av1") and all(a in ("opus", "vorbis") for a in src_a),
     }
     container = target.ext
-    same_family = target.id in ("mp4", "mov", "webm", "mkv") and (target.id == "mkv" or src_v == target.vcodec or
+    # (by container: "MP4 · H.265" from an H.265 file is a lossless copy too, not a new encode)
+    same_family = container in ("mp4", "mov", "webm", "mkv") and (target.id == "mkv" or src_v == target.vcodec or
                                                                      (target.id in ("mp4",) and src_v in ("h264",)))
+    # MP4 text subtitles cannot be copied into an MKV: they are converted
+    sub_codec = "srt" if any(s.get("codec") == "mov_text" for s in info.get("subtitles") or []) else "copy"
     if not _needs_encode(opts) and fits.get(container) and same_family and not opts.get("normalize"):
         args += ["-map", "0:V?", "-map", "0:a?"] if not remove_audio else ["-map", "0:V?"]
         if container == "mkv":
             args += ["-map", "0:s?"]
         args += ["-c", "copy", "-map_metadata", "0"]
+        if container == "mkv" and sub_codec != "copy":
+            args += ["-c:s", sub_codec]
         if container in ("mp4", "mov"):
             args += ["-movflags", "+faststart"]
             if src_v == "h265":
@@ -405,7 +440,7 @@ def _video_args(src: Path, target: Target, opts: dict, info: dict) -> tuple[list
     if not remove_audio:
         args += ["-map", "0:a?"]
     if container == "mkv":
-        args += ["-map", "0:s?", "-c:s", "copy"]
+        args += ["-map", "0:s?", "-c:s", sub_codec]
     if codec == "prores":
         args += ["-c:v", "prores_ks", "-profile:v", "3", "-vendor", "apl0", "-pix_fmt", "yuv422p10le"]
         meta["vcodec"] = "prores"

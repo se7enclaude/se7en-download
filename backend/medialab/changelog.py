@@ -2,6 +2,43 @@
 from __future__ import annotations
 
 CHANGES: dict[str, dict[str, list[str]]] = {
+    "1.7.0": {
+        "fr": ["Toute l'application a été relue : une soixantaine de bugs et de lenteurs corrigés.",
+               "Téléchargement : la barre de progression va bien jusqu'à 100 %, une nouvelle tentative ne reprend "
+               "plus le mauvais fichier, et un lien direct coupé par le réseau reprend tout seul là où il s'était arrêté.",
+               "Découper (mode rapide) : l'extrait commence avec son image dès la première seconde, et le fondu ne "
+               "coupe plus le son. Le mode précis garde le 10 bits / HDR.",
+               "Convertir : un GIF long n'épuise plus la mémoire, les vidéos de téléphone gardent la bonne taille, "
+               "« MP4 · H.265 » et « MP4 · AV1 » se font sans perte quand la source le permet, et un MP4 avec "
+               "sous-titres passe en MKV.",
+               "Sous-titres : une panne de la correction ne fait plus perdre la transcription, les vrais mots ne "
+               "sont plus supprimés (« nous nous », « vous vous »), les accents des anciens fichiers sont gardés, "
+               "et une modification faite pendant l'enregistrement n'est plus perdue.",
+               "IA : les vidéos à cadence variable ne sont plus raccourcies, et les cartes AMD / Intel de plus de "
+               "4 Go sont reconnues à leur vraie taille (traitement plus rapide).",
+               "Interface plus fluide : la file, la page IA et le journal ne se redessinent plus en permanence. "
+               "Échap ferme seulement la fenêtre du dessus, Ctrl+O et le collage ne touchent plus les pages cachées.",
+               "Historique : bouton « Afficher les plus anciens » au-delà de 300 entrées, et le filtre par site "
+               "se retire à nouveau.",
+               "Ouvrir plusieurs fichiers d'un coup depuis l'Explorateur ne lance plus plusieurs se7en.",
+               "Une mise à jour déjà téléchargée n'est plus perdue si la connexion tombe."],
+        "en": ["The whole application was reviewed: about sixty bugs and slowdowns fixed.",
+               "Download: the progress bar reaches 100%, a retry no longer picks up the wrong file, and a direct "
+               "link cut by the network resumes on its own where it stopped.",
+               "Cut (fast mode): the clip starts with its picture from the first second, and the fade no longer "
+               "mutes the sound. Precise mode keeps 10-bit / HDR.",
+               "Convert: a long GIF no longer runs out of memory, phone videos keep the right size, \"MP4 · H.265\" "
+               "and \"MP4 · AV1\" are lossless when the source allows it, and an MP4 with subtitles converts to MKV.",
+               "Subtitles: a failed correction no longer loses the transcript, real words are no longer removed, "
+               "accents of older files are kept, and an edit made while saving is no longer lost.",
+               "AI: variable frame rate videos are no longer shortened, and AMD / Intel cards above 4 GB are seen "
+               "at their real size (faster processing).",
+               "Smoother interface: the queue, the AI page and the log no longer redraw all the time. Escape only "
+               "closes the top window; Ctrl+O and paste no longer reach hidden pages.",
+               "History: \"Show older entries\" beyond 300 entries, and the site filter can be removed again.",
+               "Opening several files at once from Explorer no longer starts several se7en.",
+               "An update already downloaded is no longer lost when the connection drops."],
+    },
     "1.6.1": {
         "fr": ["Corrigé : mettre en pause, annuler ou supprimer un téléchargement en streaming (HLS/DASH) ne le fait plus passer pour un échec, et il ne repart plus tout seul.",
                "Corrigé : une conversion « Convertir en » interrompue reprend sans retélécharger le fichier (plus de doublon).",

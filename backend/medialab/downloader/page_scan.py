@@ -11,6 +11,7 @@ like anywhere else in se7en.
 """
 from __future__ import annotations
 
+import contextlib
 import heapq
 import json
 import re
@@ -56,8 +57,20 @@ def _clean(url: str, base: str) -> str | None:
     return urlunparse(p._replace(fragment=""))
 
 
+_embed_cache: dict[str, bool] = {}
+
+
 def _embed_supported(url: str) -> bool:
     """An embedded player of a site yt-dlp knows (its generic extractor does not count)."""
+    hit = _embed_cache.get(url)
+    if hit is None:
+        if len(_embed_cache) > 5000:
+            _embed_cache.clear()
+        hit = _embed_cache[url] = _embed_supported_uncached(url)
+    return hit
+
+
+def _embed_supported_uncached(url: str) -> bool:
     try:
         from yt_dlp.extractor import gen_extractor_classes
     except Exception:  # pragma: no cover - yt-dlp is always bundled
@@ -334,6 +347,7 @@ class SiteScanner:
         self.browser = None
         self.browser_failed = False
         self.start_title = ""
+        self._first_error: MediaLabError | None = None
         self.sites = {_site(url)}  # the site, and where its address redirects to
 
     # ------------------------------------------------------------------ helpers
@@ -403,6 +417,8 @@ class SiteScanner:
         except MediaLabError as e:
             if depth == 0 and not self.render_enabled:
                 raise
+            if depth == 0:
+                self._first_error = e  # shown if the browser finds nothing either (no network, 404...)
             log.info("Site scan: %s could not be read raw (%s)", url, e.code)
         c, raw_entries = _parse(html, final) if html else (_Collector(final), [])
         title = " ".join(c.title.split())
@@ -518,8 +534,13 @@ class SiteScanner:
             from ..errors import Canceled
             raise Canceled()
         self.report(percent=98.0, label="", pages=len(self.pages), found=len(self.entries), step="check")
-        _finish(self.entries)
+        _finish(self.entries, self.cancel, max(self.deadline, time.monotonic() + 20))
+        if self.cancel.is_set():
+            from ..errors import Canceled
+            raise Canceled()
         if not self.entries:
+            if self._first_error is not None:
+                raise self._first_error
             raise MediaLabError("no_media", "No video was found on this site.",
                                 "The videos may need an account, or be protected.")
         start_page = self.pages[0]["url"] if self.pages else self.start
@@ -567,7 +588,7 @@ class _Quiet:
 _DRM_HLS = re.compile(r"#EXT-X-(?:SESSION-)?KEY:[^\n]*(METHOD=SAMPLE-AES|KEYFORMAT=\"(?!identity)[^\"]+\")", re.I)
 
 
-def _finish(entries: list[dict]) -> None:
+def _finish(entries: list[dict], cancel: Any = None, deadline: float | None = None) -> None:
     """Read the stream manifests: drop the variants of a master playlist, mark protected (DRM) streams."""
     variants: set[str] = set()
     master_pages: set[str] = set()
@@ -575,10 +596,19 @@ def _finish(entries: list[dict]) -> None:
     manifests = [e for e in entries if e.get("stream")][:40]
     with httpx.Client(follow_redirects=True, timeout=httpx.Timeout(8), headers={"User-Agent": UA}) as c:
         for e in manifests:
+            if (cancel is not None and cancel.is_set()) or (deadline is not None and time.monotonic() > deadline):
+                break  # the manifests not read are kept as they are
             try:
-                r = c.get(e["url"], headers=referer_headers(e.get("referer")))
-                text = r.text[:400_000] if r.status_code < 400 else ""
-            except httpx.HTTPError:
+                # streamed and cut at 400 KB: a "manifest" link can be a whole video
+                with c.stream("GET", e["url"], headers=referer_headers(e.get("referer"))) as r:
+                    raw = b""
+                    if r.status_code < 400:
+                        for chunk in r.iter_bytes(65536):
+                            raw += chunk
+                            if len(raw) >= 400_000:
+                                break
+                    text = raw[:400_000].decode(r.encoding or "utf-8", errors="replace")
+            except (httpx.HTTPError, LookupError):
                 continue
             if "#EXTINF" in text and "#EXT-X-STREAM-INF" not in text:
                 media_playlists.append(e)

@@ -11,6 +11,7 @@ Nothing is decrypted: an encrypted stream stays encrypted.
 """
 from __future__ import annotations
 
+import contextlib
 import itertools
 import json
 import os
@@ -231,7 +232,14 @@ class Browser:
             if port_file.is_file():
                 lines = port_file.read_text("utf-8", errors="replace").split()
                 if len(lines) >= 2:
-                    self.cdp = _CDP(f"ws://127.0.0.1:{lines[0]}{lines[1]}")
+                    try:
+                        self.cdp = _CDP(f"ws://127.0.0.1:{lines[0]}{lines[1]}")
+                        # a scanned page must never drop a file into the user's Downloads folder
+                        with contextlib.suppress(Exception):
+                            self.cdp.send("Browser.setDownloadBehavior", {"behavior": "deny"}, timeout=5)
+                    except BaseException:
+                        self.__exit__(None, None, None)  # no browser left running, no profile left on disk
+                        raise
                     return self
             if self.proc.poll() is not None:
                 break

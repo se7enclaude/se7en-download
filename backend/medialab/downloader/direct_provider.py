@@ -1,6 +1,7 @@
 """Direct links to media files (images, videos, audio) with resumable HTTP."""
 from __future__ import annotations
 
+import contextlib
 import mimetypes
 import re
 import shutil
@@ -38,6 +39,9 @@ def referer_headers(referer: str | None) -> dict[str, str]:
         return {}
     p = urlparse(referer)
     return {"Referer": referer, "Origin": f"{p.scheme}://{p.netloc}"}
+
+
+_KNOWN_EXT = frozenset().union(*MEDIA_EXT.values())
 
 
 def _ext_kind(url: str) -> str | None:
@@ -107,7 +111,9 @@ class DirectProvider(SourceProvider):
                     ua = HONEST_UA
                     r = c.head(url, headers={"User-Agent": ua})
                 if r.status_code >= 400 or not r.headers.get("content-type"):
-                    r = c.get(url, headers={"Range": "bytes=0-0", "User-Agent": ua})
+                    # headers only: a server that ignores Range would otherwise send the whole file into memory
+                    with c.stream("GET", url, headers={"Range": "bytes=0-0", "User-Agent": ua}) as r:
+                        pass
                 kind = _kind_from_ctype(r.headers.get("content-type", ""))
                 if not kind:
                     return None
@@ -138,6 +144,12 @@ class DirectProvider(SourceProvider):
             info["warnings"].append("The server does not support resuming; an interrupted download restarts.")
         return info
 
+    def fallback_strategies(self, error_code: str, attempt: int) -> dict[str, Any] | None:
+        # the partial file is kept: the retry resumes where the connection dropped
+        if error_code in ("network", "server_error", "unknown") and attempt < 2:
+            return {"label": "Resuming after network error"}
+        return None
+
     def download(self, url: str, options: dict[str, Any], ctx: DownloadContext) -> DownloadResult:
         d = ctx.settings.download
         out_root = Path(options.get("output_dir") or d.default_folder).expanduser()
@@ -146,7 +158,11 @@ class DirectProvider(SourceProvider):
         folder.mkdir(parents=True, exist_ok=True)
         name = unquote(Path(urlparse(url).path).name) or "download"
         stem = sanitize_component(options.get("title") or Path(name).stem, 150)
-        ext = Path(name).suffix  # no extension in the link: the server's Content-Type decides (below)
+        # no (known) extension in the link: the server's Content-Type decides (below). "stream.php" or a hash
+        # after a dot is not a file type.
+        ext = Path(name).suffix.lower()
+        if ext not in _KNOWN_EXT:
+            ext = ""
         ctype = None
         part = ctx.temp_dir / f"{ctx.job_id}.part"
         ctx.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -163,14 +179,15 @@ class DirectProvider(SourceProvider):
                     if r.status_code == 403 and headers.get("User-Agent") == UA:
                         raise _RetryHonest()
                     if r.status_code == 416:  # already complete
-                        pass
+                        with contextlib.suppress(httpx.HTTPError):
+                            ctype = c.head(url, headers={k: v for k, v in headers.items() if k != "Range"}).headers.get("content-type")
                     else:
                         if r.status_code >= 400:
                             raise MediaLabError("http_error", f"The server answered HTTP {r.status_code}.",
                                                 "The link may have expired.", r.status_code >= 500)
                         ctype = r.headers.get("content-type")
                         if done and r.status_code != 206:
-                            done = 0  # server ignored Range: restart
+                            done = bytes_last = 0  # server ignored Range: restart
                         total = int(r.headers.get("content-length") or 0) + done or None
                         with open(part, "ab" if done else "wb") as f:
                             for chunk in r.iter_bytes(1 << 18):

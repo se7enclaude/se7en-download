@@ -83,13 +83,20 @@ export function MediaPlayer({
   }, [volume, muted, speed, loop, src, mediaRef]);
 
   // autoplay once the file is ready
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const timeRef = useRef(time);
+  timeRef.current = time;
   useEffect(() => {
     const el = mediaRef.current;
     if (!el || !autoPlay || isImage) return;
-    const go = () => el.play().catch(() => undefined);
+    // a hidden player never starts a video (music goes on to the next track)
+    const go = () => {
+      if (activeRef.current || isAudio) el.play().catch(() => undefined);
+    };
     el.addEventListener("loadeddata", go, { once: true });
     return () => el.removeEventListener("loadeddata", go);
-  }, [src, autoPlay, isImage, mediaRef]);
+  }, [src, autoPlay, isImage, isAudio, mediaRef]);
 
   useEffect(() => {
     const el = mediaRef.current;
@@ -126,19 +133,25 @@ export function MediaPlayer({
   );
   useEffect(() => {
     if (!isAudio) return;
+    // animated only while the music plays on screen; otherwise one still frame (no work in the background)
+    const live = playing && active;
     let raf = 0;
+    let data = new Uint8Array(0);
     const draw = () => {
-      raf = requestAnimationFrame(draw);
+      if (live) raf = requestAnimationFrame(draw);
       const c = canvasRef.current;
-      const a = analyser.current;
+      const a = live ? analyser.current : null;
       if (!c) return;
       const g = c.getContext("2d");
       if (!g) return;
-      const w = (c.width = c.clientWidth * devicePixelRatio);
-      const h = (c.height = c.clientHeight * devicePixelRatio);
+      const w = Math.round(c.clientWidth * devicePixelRatio);
+      const h = Math.round(c.clientHeight * devicePixelRatio);
+      if (c.width !== w) c.width = w; // setting the size reallocates the canvas
+      if (c.height !== h) c.height = h;
       g.clearRect(0, 0, w, h);
       const bars = 48;
-      const data = new Uint8Array(a ? a.node.frequencyBinCount : bars);
+      const need = a ? a.node.frequencyBinCount : bars;
+      if (data.length !== need) data = new Uint8Array(need);
       if (a) a.node.getByteFrequencyData(data);
       const bw = w / bars;
       for (let i = 0; i < bars; i++) {
@@ -150,7 +163,7 @@ export function MediaPlayer({
     };
     draw();
     return () => cancelAnimationFrame(raf);
-  }, [isAudio]);
+  }, [isAudio, playing, active]);
 
   const fullscreen = useCallback(() => {
     const box = boxRef.current;
@@ -199,10 +212,10 @@ export function MediaPlayer({
       if (k === " " || k === "k") {
         e.preventDefault();
         toggle();
-      } else if (k === "arrowright") seek(time + 5);
-      else if (k === "arrowleft") seek(time - 5);
-      else if (k === "l") seek(time + 10);
-      else if (k === "j") seek(time - 10);
+      } else if (k === "arrowright") seek(timeRef.current + 5);
+      else if (k === "arrowleft") seek(timeRef.current - 5);
+      else if (k === "l") seek(timeRef.current + 10);
+      else if (k === "j") seek(timeRef.current - 10);
       else if (k === "arrowup") {
         e.preventDefault();
         setVolume((v) => Math.min(1, v + 0.05));
@@ -217,7 +230,7 @@ export function MediaPlayer({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [active, toggle, seek, time, fullscreen, onNext, onPrev, duration]);
+  }, [active, toggle, seek, fullscreen, onNext, onPrev, duration]);
 
   const pct = duration ? (time / duration) * 100 : 0;
   const bpct = duration ? (Math.min(duration, buffered) / duration) * 100 : 0;

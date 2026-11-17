@@ -36,7 +36,7 @@ CLAUDE_DEFAULT_MODEL = "claude-opus-5-5"
 FILLERS = {
     "fr": r"\b(?:euh+|heu+|hum+|hmm+|mmh+|bah|ben)\b[,.]?",
     "en": r"\b(?:uh+|um+|umm+|erm+|hmm+|mhm)\b[,.]?",
-    "es": r"\b(?:eh+|em+|este|mmm+)\b[,.]?",
+    "es": r"\b(?:eh+|em+|mmm+)\b[,.]?",  # not "este": it is also a real word
     "it": r"\b(?:ehm+|eh+|mmm+)\b[,.]?",
     "de": r"\b(?:äh+|ähm+|öh+|hm+)\b[,.]?",
     "pt": r"\b(?:éh+|hum+|ahn+)\b[,.]?",
@@ -49,7 +49,8 @@ def clean_hesitations(text: str, lang: str) -> str:
     pat = FILLERS.get(lang)
     if pat:
         t = re.sub(pat, "", t)  # case-sensitive on purpose: "Ben" can be a name
-    t = re.sub(r"\b(\w{1,6})( \1\b)+", r"\1", t, flags=re.I)  # je je / the the
+    # je je / the the, but not the real doubles ("nous nous sommes", "vous vous trompez", "had had", "that that")
+    t = re.sub(r"\b(?!(?:nous|vous|had|that)\b)(\w{1,6})( \1\b)+", r"\1", t, flags=re.I)
     t = re.sub(r"\s+([,.!?;:])", r"\1", re.sub(r"\s{2,}", " ", t)).strip(" ,")
     return t[:1].upper() + t[1:] if t and text[:1].isupper() else t
 

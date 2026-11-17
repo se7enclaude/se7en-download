@@ -86,6 +86,16 @@ def process_video(job_id: str, src: Path, dst: Path, opts: dict, settings: Setti
     if info.get("kind") != "video" or not info.get("fps"):
         raise MediaLabError("not_video", "This file has no usable video stream.", "Choose another file.")
     w, h, fps = info["width"], info["height"], info["fps"]
+    if info.get("vfr"):
+        # Variable frame rate: the frames are resampled to a constant rate. Seeks, segment sizes and the frame
+        # count must use that same rate (they used the average one: content was lost at every segment boundary
+        # and the picture ended before the sound).
+        cfr = Fraction(str(info.get("r_frame_rate") or "0")).limit_denominator(1001000)
+        if not (fps <= cfr <= fps * 1.5):
+            cfr = Fraction(round(fps) or 1)
+        fps = float(cfr)
+        info = {**info, "fps": fps, "r_frame_rate": f"{cfr.numerator}/{cfr.denominator}",
+                "frames": int((info.get("duration") or 0) * fps), "frames_exact": False}
     if info.get("rotation") in (90, -90, 270, -270):
         w, h = h, w  # ffmpeg auto-rotates while decoding
     upscale = wants_upscale(opts)
@@ -430,8 +440,12 @@ def _mux(listing: Path, src: Path, dst: Path, info: dict, container: str, opts: 
     if container == "mp4":
         args += ["-movflags", "+faststart"]
     args.append(str(tmp))
-    ffmpeg.run(args, cancel=cancel, label="mux")
-    os.replace(tmp, dst)
+    try:
+        ffmpeg.run(args, cancel=cancel, label="mux")
+        os.replace(tmp, dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)  # never a multi-GB ".muxing" file left in the user's folder
+        raise
 
 
 def _classic_fast_path(src: Path, dst: Path, info: dict, opts: dict, out_w: int, out_h: int, encoder: str,
@@ -445,13 +459,24 @@ def _classic_fast_path(src: Path, dst: Path, info: dict, opts: dict, out_w: int,
     args = ["-i", str(src), "-map", "0:v:0", "-vf", ",".join(chain), *ffmpeg.encoder_args(encoder, quality),
             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"]
     if opts.get("keep_audio", True) and info.get("has_audio"):
-        args += ["-map", "0:a?", "-c:a", "copy" if container != "webm" else "libopus"]
+        codecs = {a.get("codec") for a in info.get("audio", [])}
+        if container == "webm":
+            acodec = ["-c:a", "libopus", "-b:a", "192k"]
+        elif container == "mp4" and not codecs <= MP4_AUDIO:
+            acodec = ["-c:a", "aac", "-b:a", "256k"]  # e.g. WMA sound cannot be copied into an MP4
+        else:
+            acodec = ["-c:a", "copy"]
+        args += ["-map", "0:a?", *acodec]
     if container == "mp4":
         args += ["-movflags", "+faststart"]
     args.append(str(tmp))
-    ffmpeg.run(args, duration=info.get("duration"), cancel=cancel, label="classic upscale",
-               on_progress=lambda f, s: progress({"stage": "processing", "label": "Resizing (Lanczos)",
-                                                  "percent": f * 100, "speed_x": s.get("speed")}))
-    os.replace(tmp, dst)
+    try:
+        ffmpeg.run(args, duration=info.get("duration"), cancel=cancel, label="classic upscale",
+                   on_progress=lambda f, s: progress({"stage": "processing", "label": "Resizing (Lanczos)",
+                                                      "percent": f * 100, "speed_x": s.get("speed")}))
+        os.replace(tmp, dst)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
     return {"width": out_w, "height": out_h, "fps": info.get("fps"), "duration": info.get("duration"),
             "plan": f"Lanczos to {out_w}×{out_h}", "encoder": encoder, "verified": True, "warnings": []}

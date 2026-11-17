@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS history (
     created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_history_created ON history(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_history_source ON history(source);
 
 CREATE TABLE IF NOT EXISTS fingerprints (
     path TEXT PRIMARY KEY,
@@ -179,6 +180,9 @@ class Database:
         else:
             rows = self._all("SELECT * FROM jobs ORDER BY priority DESC, position ASC")
         return [_decode(r) for r in rows]
+
+    def count_jobs_by_status(self) -> dict[str, int]:
+        return {r[0]: r[1] for r in self._all("SELECT status, COUNT(*) FROM jobs GROUP BY status")}
 
     def delete_job(self, job_id: str) -> None:
         self._exec("DELETE FROM jobs WHERE id=?", (job_id,))

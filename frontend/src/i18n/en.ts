@@ -205,6 +205,7 @@ export const en: Record<string, string> = {
   "history.emptyBody": "Finished downloads, AI tasks, conversions and cuts are listed here with their file, folder and settings.",
   "history.missing": "File moved or deleted",
   "history.requeued": "Added to the queue again",
+  "history.more": "Show older entries",
   "history.downloadAgain": "Download again",
   "history.upscaleAgain": "Run again",
   "history.delete": "Delete from history",

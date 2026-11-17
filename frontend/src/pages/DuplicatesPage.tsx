@@ -122,6 +122,8 @@ export function DuplicatesPage() {
       );
       setSelected(new Set());
       toast({ kind: r.failed.length ? "warning" : "success", title: t("dupes.trashed", { n: r.trashed.length }), body: r.failed.length ? t("dupes.trashFailed", { n: r.failed.length }) : undefined });
+    } catch (e: any) {
+      toast({ kind: "error", title: e?.message ?? String(e), body: e?.hint });
     } finally {
       setTrashing(false);
       setConfirm(false);

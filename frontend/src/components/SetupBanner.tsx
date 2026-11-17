@@ -23,16 +23,31 @@ export function SetupBanner() {
   const busy = missing.find((c) => ["starting", "downloading", "extracting"].includes(progress[c.id]?.state ?? ""));
   const installAll = async () => {
     // one at a time: the backend installs components sequentially
+    const RUNNING = ["starting", "downloading", "extracting"];
     for (const c of missing) {
-      await api.post(`/api/components/${c.id}/install`);
+      // forget the result of an earlier attempt: it would end the wait at once
+      useApp.setState((s) => {
+        const { [c.id]: _old, ...rest } = s.componentProgress;
+        return { componentProgress: rest };
+      });
+      try {
+        await api.post(`/api/components/${c.id}/install`);
+      } catch (e: any) {
+        useApp.getState().toast({ kind: "error", title: e?.message ?? String(e), body: e?.hint });
+        return;
+      }
+      // wait for any final state (installed, failed, already up to date, restart needed); 15 min at most
       await new Promise<void>((resolve) => {
-        const iv = window.setInterval(() => {
-          const st = useApp.getState().componentProgress[c.id]?.state;
-          if (st === "installed" || st === "failed") {
-            window.clearInterval(iv);
-            resolve();
-          }
-        }, 400);
+        const done = () => {
+          window.clearTimeout(limit);
+          unsub();
+          resolve();
+        };
+        const limit = window.setTimeout(done, 15 * 60_000);
+        const unsub = useApp.subscribe((s) => {
+          const st = s.componentProgress[c.id]?.state;
+          if (st && !RUNNING.includes(st)) done();
+        });
       });
     }
   };

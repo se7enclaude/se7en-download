@@ -1,14 +1,14 @@
 import clsx from "clsx";
 import { AnimatePresence, motion } from "motion/react";
 import { AudioLines, FolderOpen, MicVocal, Play, Plus, Trash2, Video, WandSparkles, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { api, thumbUrl } from "../api/client";
 import type { Job, LocalFile } from "../api/types";
 import { Button, Field, Notice, PageHead, Progress, Segmented, Select, StatusBadge, Switch, Ticks } from "../components/ui";
 import { useFileIntake } from "../hooks/useFileIntake";
 import { useT } from "../i18n";
 import { bytes, duration } from "../lib/format";
-import { useApp } from "../store/app";
+import { useApp, useJobList } from "../store/app";
 
 type Op = "separate" | "clean";
 type Stems = "both" | "vocals" | "instrumental";
@@ -27,7 +27,6 @@ const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p;
 export function StudioPage() {
   const t = useT();
   const settings = useApp((s) => s.settings);
-  const jobs = useApp((s) => s.jobs);
   const toast = useApp((s) => s.toast);
   const setPage = useApp((s) => s.setPage);
   const openInPlayer = useApp((s) => s.openInPlayer);
@@ -95,7 +94,7 @@ export function StudioPage() {
     useApp.getState().saveSettings({ tools: { studio_output_folder: r.path } }).catch(() => undefined); // remembered
   };
 
-  const recent = useMemo(() => Object.values(jobs).filter((j) => j.kind === "studio").sort((a, b) => b.created_at - a.created_at).slice(0, 6), [jobs]);
+  const recent = useJobList((jobs) => jobs.filter((j) => j.kind === "studio").sort((a, b) => b.created_at - a.created_at).slice(0, 6));
   const strengthHint = sound === "voice" ? t(`studio.voice.${strength}`) : t("studio.otherHint");
 
   return (

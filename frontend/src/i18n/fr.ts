@@ -194,6 +194,7 @@ export const fr: Record<string, string> = {
   "history.emptyBody": "Les téléchargements, traitements IA, conversions et découpes terminés apparaissent ici avec leur fichier, dossier et réglages.",
   "history.missing": "Fichier déplacé ou supprimé",
   "history.requeued": "Ajouté à nouveau à la file",
+  "history.more": "Afficher les plus anciens",
   "history.downloadAgain": "Télécharger à nouveau",
   "history.upscaleAgain": "Relancer",
   "history.delete": "Supprimer de l'historique",

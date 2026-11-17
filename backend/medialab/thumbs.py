@@ -44,15 +44,19 @@ def cache_remote(url: str | None) -> str | None:
         return key
     try:
         with httpx.Client(follow_redirects=True, timeout=10, headers={"User-Agent": UA}) as c:
-            r = c.get(url)
-            r.raise_for_status()
-            if len(r.content) > MAX_BYTES:
-                return None
-            ctype = r.headers.get("content-type", "")
+            # streamed: a "thumbnail" link that is in fact a huge file is dropped, not read into memory
+            with c.stream("GET", url) as r:
+                r.raise_for_status()
+                data = b""
+                for chunk in r.iter_bytes(65536):
+                    data += chunk
+                    if len(data) > MAX_BYTES:
+                        return None
+                ctype = r.headers.get("content-type", "")
             ext = ".png" if "png" in ctype else ".webp" if "webp" in ctype else ".jpg"
-            (paths().thumbnails / f"{key}{ext}").write_bytes(r.content)
+            (paths().thumbnails / f"{key}{ext}").write_bytes(data)
             return key
-    except (httpx.HTTPError, OSError) as e:
+    except Exception as e:  # noqa: BLE001 - a thumbnail must never fail a download (httpx.InvalidURL is not an HTTPError)
         log.debug("thumbnail fetch failed for %s: %s", url, e)
         return None
 
@@ -74,15 +78,15 @@ def cache_local(file_path: str | Path, at: float = 1.0, size: int = 480) -> str 
     kind = media_kind(p)
     try:
         if kind == "image":
-            from PIL import Image
-            with Image.open(p) as im:
+            from .media.images import open_image
+            with open_image(p) as im:
                 im.thumbnail((size, size))
                 im.convert("RGB").save(out, "JPEG", quality=85)
             return key
         ffmpeg = find_binary("ffmpeg")
         if not ffmpeg:
             return None
-        for t in (at, 0):
+        for t in dict.fromkeys((at, 0)):  # the same instant is not tried twice
             subprocess.run([ffmpeg, "-hide_banner", "-v", "error", "-y", "-ss", str(t), "-i", str(p),
                             "-frames:v", "1", "-vf", f"scale={size}:-2", str(out)],
                            capture_output=True, timeout=30, creationflags=CREATE_NO_WINDOW)

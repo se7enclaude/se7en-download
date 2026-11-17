@@ -1,7 +1,7 @@
 import clsx from "clsx";
 import { AnimatePresence, motion } from "motion/react";
 import { Clapperboard, FolderOpen, Image as ImageIcon, ListMusic, Music2, Plus, Scissors, Search, Trash2, Video, Wand2, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, thumbUrl } from "../api/client";
 import type { LibraryItem, LocalFile } from "../api/types";
 import { MediaPlayer } from "../components/MediaPlayer";
@@ -34,7 +34,7 @@ export function PlayerPage() {
   const [library, setLibrary] = useState<LibraryItem[]>([]);
   const [libKind, setLibKind] = useState<"" | "video" | "audio" | "image">("");
   const [q, setQ] = useState("");
-  const [shuffle] = useState(false);
+  const startPath = useRef<string | null>(null); // the file to play first when several arrive together
 
   const add = useCallback((files: LocalFile[], play = true) => {
     const items = files.map((f) => ({ path: f.path, name: f.name, kind: f.kind === "animated" ? "image" : f.kind ?? "video", thumbnail: f.thumbnail, duration: f.duration, size: f.size }));
@@ -43,7 +43,9 @@ export function PlayerPage() {
       const fresh = items.filter((i) => !known.has(i.path));
       const next = [...prev, ...fresh];
       if (play) {
-        const first = items[0] ? next.findIndex((x) => x.path === items[0].path) : -1;
+        const wanted = items.find((x) => x.path === startPath.current) ?? items[0];
+        startPath.current = null;
+        const first = wanted ? next.findIndex((x) => x.path === wanted.path) : -1;
         if (first >= 0) setIndex(first);
       }
       return next;
@@ -54,6 +56,7 @@ export function PlayerPage() {
   // "Play" from the history, the cutter, the converter...
   useEffect(() => {
     if (!playerQueue) return;
+    startPath.current = playerQueue.paths[playerQueue.index] ?? null;
     intake.addPaths(playerQueue.paths);
     setTab("queue");
   }, [playerQueue?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -65,8 +68,8 @@ export function PlayerPage() {
   const current = queue[index];
   const next = useCallback(() => {
     if (!queue.length) return;
-    setIndex((i) => (shuffle ? Math.floor(Math.random() * queue.length) : (i + 1) % queue.length));
-  }, [queue.length, shuffle]);
+    setIndex((i) => (i + 1) % queue.length);
+  }, [queue.length]);
   const prev = useCallback(() => queue.length && setIndex((i) => (i - 1 + queue.length) % queue.length), [queue.length]);
   const onEnded = useCallback(() => {
     if (index < queue.length - 1) setIndex(index + 1);
@@ -162,7 +165,7 @@ export function PlayerPage() {
                       onClick={(e) => {
                         e.stopPropagation();
                         setQueue((xs) => xs.filter((x) => x.path !== it.path));
-                        setIndex((cur) => (i < cur ? cur - 1 : Math.min(cur, queue.length - 2)));
+                        setIndex((cur) => (i < cur ? cur - 1 : Math.max(0, Math.min(cur, queue.length - 2))));
                       }}
                     >
                       <X size={13} />

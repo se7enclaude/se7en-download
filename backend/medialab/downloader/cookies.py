@@ -34,7 +34,9 @@ def _store_path() -> Path:
 
 def import_cookies_file(content: bytes) -> dict:
     text = content.decode("utf-8", errors="replace")
-    lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
+    # "#HttpOnly_" lines are cookies too (not comments)
+    lines = [ln.removeprefix("#HttpOnly_") for ln in text.splitlines()
+             if ln.strip() and (not ln.startswith("#") or ln.startswith("#HttpOnly_"))]
     if not lines or not all(len(ln.split("\t")) >= 7 for ln in lines[:20]):
         raise MediaLabError("bad_cookies", "This is not a Netscape cookies.txt file.",
                             "Export cookies in “Netscape” format with a cookies.txt browser extension.")
@@ -52,6 +54,17 @@ def delete_cookies_file() -> None:
     _store_path().unlink(missing_ok=True)
 
 
+def sweep_leftovers() -> None:
+    """At startup: cookies in clear and scan-browser profiles left by a crash or a power cut."""
+    import shutil
+    temp = paths().temp
+    for p in temp.glob("mlc_*.txt"):
+        with contextlib.suppress(OSError):
+            p.unlink()
+    for p in temp.glob("se7en-scan-*"):
+        shutil.rmtree(p, ignore_errors=True)
+
+
 @contextlib.contextmanager
 def ytdlp_cookie_options(settings: Settings, force: bool = False) -> Iterator[dict]:
     """Yield yt-dlp params for the configured cookie mode, cleaning up afterwards."""
@@ -63,10 +76,15 @@ def ytdlp_cookie_options(settings: Settings, force: bool = False) -> Iterator[di
         yield {"cookiesfrombrowser": (browser, None, None, None)}
         return
     if mode == "file" and _store_path().exists():
+        try:
+            clear = unprotect(_store_path().read_bytes())
+        except OSError as e:  # stored on another PC or Windows account: it cannot be read here
+            raise MediaLabError("bad_cookies", "The stored cookies file cannot be read on this PC.",
+                                "Import your cookies file again in Settings › Privacy.") from e
         fd, tmp = tempfile.mkstemp(prefix="mlc_", suffix=".txt", dir=paths().temp)
         try:
             with os.fdopen(fd, "wb") as f:
-                f.write(unprotect(_store_path().read_bytes()))
+                f.write(clear)
             yield {"cookiefile": tmp}
         finally:
             with contextlib.suppress(OSError):

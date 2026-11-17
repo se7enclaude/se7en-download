@@ -215,6 +215,31 @@ def test_fast_cut_merges_parts(media):
     assert not res["extra_files"]
 
 
+def _video_packets(path) -> int:
+    from medialab.components import find_binary
+    out = subprocess.run([find_binary("ffprobe"), "-v", "error", "-select_streams", "v:0", "-count_packets",
+                          "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True).stdout
+    return int(out.strip().strip(",") or 0)
+
+
+def test_fast_cut_keeps_the_picture_from_its_first_frame(media):
+    # B-frames: the keyframe is decoded a few frames before it is shown. It used to be dropped, and the part
+    # started with sound and no picture until the next keyframe.
+    res = _cut(media["mkv"], [{"start": 2, "end": 3}], mode="fast")
+    assert 22 <= _video_packets(res["file_path"]) <= 30
+
+
+def test_fast_cut_with_fade_is_not_muted(media):
+    from medialab.components import find_binary
+    res = _cut(media["mkv"], [{"start": 2, "end": 3.5}], mode="fast", fade=0.3)
+    err = subprocess.run([find_binary("ffmpeg"), "-hide_banner", "-i", res["file_path"], "-af", "volumedetect",
+                          "-vn", "-f", "null", "-"], capture_output=True, text=True, errors="replace").stderr
+    import re
+    mean = float(re.search(r"mean_volume: (-?[\d.]+) dB", err).group(1))
+    assert mean > -40
+
+
 def test_separate_parts_and_remove_mode(media):
     res = _cut(media["flac"], [{"start": 1, "end": 2}], remove=True, output="separate")
     files = [res["file_path"], *res["extra_files"]]

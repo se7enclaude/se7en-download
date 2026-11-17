@@ -20,7 +20,6 @@ const PAGES: Page[] = ["download", "queue", "upscale", "convert", "trim", "studi
 /** Global navigation shortcuts. Page-level shortcuts live in the pages. */
 export function useGlobalShortcuts(openHelp: () => void) {
   const setPage = useApp((s) => s.setPage);
-  const toggleSidebar = useApp((s) => s.toggleSidebar);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -36,9 +35,6 @@ export function useGlobalShortcuts(openHelp: () => void) {
         } else if (e.key.toLowerCase() === "l") {
           e.preventDefault();
           setPage("logs");
-        } else if (e.key.toLowerCase() === "b") {
-          e.preventDefault();
-          toggleSidebar();
         }
       } else if (!typing && e.key === "?") {
         e.preventDefault();
@@ -47,7 +43,7 @@ export function useGlobalShortcuts(openHelp: () => void) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [setPage, toggleSidebar, openHelp]);
+  }, [setPage, openHelp]);
 }
 
 /** Page-scoped shortcut helper. */

@@ -26,6 +26,8 @@ export function useFileIntake({
   const t = useT();
   const shell = useApp((s) => s.info?.shell);
   const toast = useApp((s) => s.toast);
+  // pages kept alive in the background (player, cutter, subtitles) must not react to Ctrl+O or a pasted path
+  const visible = useApp((s) => s.page === page);
   const pendingFiles = useApp((s) => s.pendingFiles);
   const consumeFiles = useApp((s) => s.consumeFiles);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -35,7 +37,13 @@ export function useFileIntake({
   const addPaths = useCallback(
     async (paths: string[]) => {
       if (!paths.length) return;
-      const r = await api.post<{ files: LocalFile[] }>("/api/files/probe", { paths: multiple ? paths : paths.slice(0, 1) });
+      let r: { files: LocalFile[] };
+      try {
+        r = await api.post<{ files: LocalFile[] }>("/api/files/probe", { paths: multiple ? paths : paths.slice(0, 1) });
+      } catch (e: any) {
+        toast({ kind: "error", title: t("files.pickFailed"), body: e?.message });
+        return;
+      }
       const ok = r.files.filter((f) => f.ok);
       const bad = r.files.filter((f) => !f.ok);
       if (bad.length) toast({ kind: "warning", title: t("files.skipped", { n: bad.length }), body: bad.map((b) => `${b.name}: ${b.error?.message}`).join("\n") });
@@ -68,13 +76,18 @@ export function useFileIntake({
       if (!list?.length) return;
       const form = new FormData();
       Array.from(list).forEach((f) => form.append("files", f));
-      const r = await api.upload<{ paths: string[] }>("/api/upload", form);
-      addPaths(r.paths);
+      try {
+        const r = await api.upload<{ paths: string[] }>("/api/upload", form);
+        addPaths(r.paths);
+      } catch (e: any) {
+        toast({ kind: "error", title: t("files.pickFailed"), body: e?.message });
+      }
     },
-    [addPaths],
+    [addPaths, toast, t],
   );
 
   useEffect(() => {
+    if (!visible) return;
     const onPaste = (e: ClipboardEvent) => {
       const target = e.target as HTMLElement;
       if (target?.tagName === "INPUT" || target?.tagName === "TEXTAREA") return;
@@ -87,12 +100,16 @@ export function useFileIntake({
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [addPaths]);
+  }, [addPaths, visible]);
 
-  useKey("ctrl+o", (e) => {
-    e.preventDefault();
-    pick();
-  });
+  const onOpen = useCallback(
+    (e: KeyboardEvent) => {
+      e.preventDefault();
+      pick();
+    },
+    [pick],
+  );
+  useKey("ctrl+o", onOpen, visible);
 
   const accept = { media: "image/*,video/*", video: "video/*", audio: "audio/*", image: "image/*", av: "video/*,audio/*", any: "", playable: "image/*,video/*,audio/*" }[kind];
   return { pick, addPaths, inputProps: { ref: inputRef, type: "file" as const, multiple, accept, hidden: true, onChange: (e: React.ChangeEvent<HTMLInputElement>) => upload(e.target.files) } };

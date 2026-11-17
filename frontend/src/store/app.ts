@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import { api } from "../api/client";
 import { events } from "../api/ws";
 import type { AppEvent, Capabilities, Component, Hardware, Job, Settings, TaskState, UpdateState } from "../api/types";
@@ -199,6 +200,18 @@ export const useApp = create<AppState>((set, get) => ({
   upsertJob: (j) => set({ jobs: { ...get().jobs, [j.id]: j } }),
 }));
 
+/** A list derived from the tasks: re-renders only when a task OF THE LIST changes (not on every progress of any task). */
+export function useJobList(pick: (jobs: Job[]) => Job[]): Job[] {
+  return useApp(useShallow((s) => pick(Object.values(s.jobs))));
+}
+
+/** Replace the tasks by the server's list, keeping a task this window already knows in a newer state. */
+function applyJobSnapshot(list: Job[]): void {
+  flushJobUpdates();
+  const cur = useApp.getState().jobs;
+  useApp.setState({ jobs: Object.fromEntries(list.map((j) => [j.id, cur[j.id] && cur[j.id].updated_at > j.updated_at ? cur[j.id] : j])) });
+}
+
 /** Number of tasks in these states: a selector returning a number re-renders only when it changes. */
 export function countJobs(jobs: Record<string, Job>, statuses: string[]): number {
   let n = 0;
@@ -268,9 +281,7 @@ function onEvent(ev: AppEvent): void {
       break;
     }
     case "queue_reordered":
-      api.get<{ jobs: Job[] }>("/api/jobs").then((r) => {
-        useApp.setState({ jobs: Object.fromEntries(r.jobs.map((j) => [j.id, j])) });
-      });
+      api.get<{ jobs: Job[] }>("/api/jobs").then((r) => applyJobSnapshot(r.jobs)).catch(() => undefined);
       break;
     case "hardware":
       useApp.setState({ hardware: ev.data });
@@ -368,10 +379,16 @@ export async function bootstrap(): Promise<void> {
     const was = useApp.getState().connected;
     useApp.setState({ connected: c });
     if (c && !was && useApp.getState().ready) {
-      // resync after a reconnect
-      api.get<{ jobs: Job[] }>("/api/jobs").then((r) =>
-        useApp.setState({ jobs: Object.fromEntries(r.jobs.map((j) => [j.id, j])) }),
-      );
+      // resync after a reconnect (PC back from sleep...): everything the missed events would have changed
+      const st = useApp.getState();
+      api.get<{ jobs: Job[] }>("/api/jobs").then((r) => applyJobSnapshot(r.jobs)).catch(() => undefined);
+      api.get<UpdateState>("/api/update").then((u) => useApp.setState({ update: u })).catch(() => undefined);
+      api.get<Settings>("/api/settings").then((s) => {
+        useApp.setState({ settings: s });
+        applySoundSettings(s);
+      }).catch(() => undefined);
+      useApp.setState({ componentProgress: {}, historyVersion: st.historyVersion + 1 });
+      st.loadComponents().catch(() => undefined);
     }
   });
   events.connect();

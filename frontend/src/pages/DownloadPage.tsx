@@ -34,7 +34,7 @@ import { useKey } from "../hooks/useShortcuts";
 import { play } from "../lib/sounds";
 import { useT } from "../i18n";
 import { bytes, codecLabel, duration, num, speed } from "../lib/format";
-import { useApp } from "../store/app";
+import { useApp, useJobList } from "../store/app";
 
 const LOSSY = new Set(["mp3", "m4a", "aac", "opus", "ogg"]);
 const AUDIO_ROWS: { f: string; br?: number }[] = [
@@ -177,6 +177,7 @@ export function DownloadPage() {
 
   // ---------------------------------------------------------------- detection
   useEffect(() => {
+    let alive = true; // an answer for an older text must not come back after the box changed
     const handle = window.setTimeout(async () => {
       if (!text.trim()) {
         setDetections([]);
@@ -184,12 +185,15 @@ export function DownloadPage() {
       }
       try {
         const r = await api.post<{ urls: Detection[] }>("/api/extract-urls", { text });
-        setDetections(r.urls);
+        if (alive) setDetections(r.urls);
       } catch {
         /* harmless */
       }
     }, 160);
-    return () => window.clearTimeout(handle);
+    return () => {
+      alive = false;
+      window.clearTimeout(handle);
+    };
   }, [text]);
 
   const applyOptions = useCallback((o: DownloadOptions) => {
@@ -406,7 +410,8 @@ export function DownloadPage() {
   }, [info, mode, chosenQ, vcodec, audioFormat, audioBitrate]); // eslint-disable-line react-hooks/exhaustive-deps
   const needsH264 = (q?: Quality) => vcodec === "compat" && container === "mp4" && !!q && !q.codecs.includes("h264");
   const reencode = mode !== "audio" && mode !== "image" && chosenQ && (needsH264(chosenQ) || (!["auto", "compat"].includes(vcodec) && !chosenQ.codecs.includes(vcodec)));
-  const hwEncoder = (useApp.getState().capabilities?.video.encoders ?? []).some((e) => /_(nvenc|qsv|amf)$/.test(e));
+  const encoders = useApp((s) => s.capabilities?.video.encoders);
+  const hwEncoder = (encoders ?? []).some((e) => /_(nvenc|qsv|amf)$/.test(e));
   const sourceAbr = info?.audio?.[0]?.abr ?? null;
 
   // ---------------------------------------------------------------- actions
@@ -473,8 +478,9 @@ export function DownloadPage() {
 
   useKey("ctrl+Enter", (e) => {
     e.preventDefault();
+    if (adding || e.repeat) return; // a held key must not queue the same links twice
     if (batch) downloadBatch();
-    else if (info && !adding) downloadCurrent();
+    else if (info) downloadCurrent();
   });
   useKey("Escape", () => view === "analyze" && reset(), view === "analyze");
 
@@ -974,15 +980,16 @@ function HomeHero({ mode, setMode }: { mode: "av" | "audio" | "image"; setMode: 
 /** Bottom-left column: it starts inside the hero's notch. The card shows the last thing downloaded. */
 function HomeIntro() {
   const t = useT();
-  const jobs = useApp((s) => s.jobs);
   const setPage = useApp((s) => s.setPage);
-  const last = useMemo(
-    () =>
-      Object.values(jobs)
-        .filter((j) => j.kind === "download" && j.status === "completed" && j.thumbnail)
-        .sort((a, b) => (b.finished_at ?? b.updated_at) - (a.finished_at ?? a.updated_at))[0],
-    [jobs],
-  );
+  const last = useApp((s) => {
+    let best: Job | undefined;
+    for (const id in s.jobs) {
+      const j = s.jobs[id];
+      if (j.kind !== "download" || j.status !== "completed" || !j.thumbnail) continue;
+      if (!best || (j.finished_at ?? j.updated_at) > (best.finished_at ?? best.updated_at)) best = j;
+    }
+    return best;
+  });
   return (
     <div className="home-intro" style={{ marginTop: -INTRO_NOTCH.h + 20, width: INTRO_NOTCH.w - 22, ...rise(1) }}>
       <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>
@@ -1186,12 +1193,13 @@ function ConvertPicker({ t, value, onPick, bare }: { t: ReturnType<typeof useT>;
 
 function ActiveDownloads() {
   const t = useT();
-  const jobs = useApp((s) => s.jobs);
   const setPage = useApp((s) => s.setPage);
-  const active = Object.values(jobs)
-    .filter((j) => j.kind === "download" && ["downloading", "analyzing", "processing", "waiting"].includes(j.status))
-    .sort((a, b) => b.priority - a.priority || a.position - b.position)
-    .slice(0, 3);
+  const active = useJobList((jobs) =>
+    jobs
+      .filter((j) => j.kind === "download" && ["downloading", "analyzing", "processing", "waiting"].includes(j.status))
+      .sort((a, b) => b.priority - a.priority || a.position - b.position)
+      .slice(0, 3),
+  );
   if (!active.length) return null;
   return (
     <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} className="card home-panel" style={{ padding: "14px 16px" }}>

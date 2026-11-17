@@ -40,7 +40,6 @@ export function TrimPage() {
   const page = useApp((s) => s.page);
   const toast = useApp((s) => s.toast);
   const setPage = useApp((s) => s.setPage);
-  const jobs = useApp((s) => s.jobs);
   const openInPlayer = useApp((s) => s.openInPlayer);
   const [file, setFile] = useState<LocalFile | null>(null);
   const [segs, setSegs] = useState<Seg[]>([]);
@@ -232,7 +231,7 @@ export function TrimPage() {
       setBusy(false);
     }
   };
-  const job = lastJob ? jobs[lastJob] : null;
+  const job = useApp((s) => (lastJob ? s.jobs[lastJob] : null)) ?? null;
   // Nothing would change: the parts cover the whole file (keep) or nothing (remove).
   const noCut = duration > 0 && (removeMode ? kept >= duration - 0.05 : kept >= duration - 0.05);
 

@@ -24,7 +24,10 @@ def extract_urls(text: str) -> list[str]:
     """All http(s) URLs in pasted text (one per line, comma separated, mixed with text...)."""
     seen: dict[str, None] = {}
     for m in URL_RE.finditer(text or ""):
-        url = m.group(0).rstrip(").,;]}>'\"")
+        url = m.group(0).rstrip(".,;>'\"")
+        # a closing bracket belongs to the link when it closes one opened inside it (…/Heat_(1995_film))
+        while url and url[-1] in ")]}" and url.count(url[-1]) > url.count("([{"[")]}".index(url[-1])]):
+            url = url[:-1].rstrip(".,;>'\"")
         seen.setdefault(url, None)
     return list(seen)
 

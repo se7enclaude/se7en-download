@@ -107,7 +107,9 @@ def _video_encoder(info: dict, container: str) -> tuple[str, list[str]]:
     elif fam not in ("h264", "h265", "av1"):
         fam = "h264"
     enc = ffmpeg.best_encoder(fam) or ffmpeg.best_encoder("h264") or "libx264"
-    args = ffmpeg.encoder_args(enc, 18 if fam == "h264" else 20)
+    # 10-bit / HDR sources stay 10-bit (8-bit output showed banding, with HDR tags on 8-bit data)
+    ten_bit = int(info.get("bit_depth") or 8) > 8 and fam != "h264"
+    args = ffmpeg.encoder_args(enc, 18 if fam == "h264" else 20, ten_bit=ten_bit)
     if fam == "h265" and container in ("mp4", "mov", "m4v"):
         args += ["-tag:v", "hvc1"]
     return enc, args
@@ -162,13 +164,20 @@ def trim(src: Path, segments: list[dict], opts: dict, cancel: threading.Event, p
                     continue
             length = b - a
             label = f"Cutting part {i + 1}/{len(parts)}" if len(parts) > 1 else "Cutting"
+            fade_at = 0.0  # where the part starts on the audio filter's clock
             piece = work / f"part{i:03d}{src.suffix}"
             if is_video and mode == "fast":
                 # Stream copy: seek near the part (fast on long files), then drop packets up to the
                 # exact keyframe. Input seeking alone keeps whole extra GOPs with MKV sources.
+                # Packets are dropped by decoding time, which is a few frames BEFORE the display time of a
+                # keyframe when the video has B-frames: without this margin the keyframe itself was dropped and
+                # the part started with sound but no picture until the next keyframe.
                 pre = max(0.0, a - 15.0)
-                args = ["-ss", f"{pre:.3f}", "-i", str(src), "-ss", f"{max(0.0, a - pre - 0.002):.3f}",
-                        "-t", f"{length:.3f}"]
+                lead = 0.002 + 3 / float(info.get("fps") or 25)
+                off = a - pre - lead
+                fade_at = max(0.0, off)
+                args = ["-ss", f"{pre:.3f}", "-i", str(src), *(["-ss", f"{off:.3f}"] if off > 0 else []),
+                        "-t", f"{length + lead:.3f}"]
             else:
                 args = ["-ss", f"{a:.3f}", "-i", str(src), "-t", f"{length:.3f}"]
             # Streams: main picture, every sound track, cover art kept for music files.
@@ -193,7 +202,9 @@ def trim(src: Path, segments: list[dict], opts: dict, cancel: threading.Event, p
                 args += _audio_codec_args(a0.get("codec"), container, int(a0.get("bitrate") or 0) or None)
                 if fade:
                     f = min(fade, length / 2)
-                    args += ["-af", f"afade=t=in:st=0:d={f:.3f},afade=t=out:st={max(0.0, length - f):.3f}:d={f:.3f}"]
+                    # (filters run before the output seek: the fades are placed on that clock, or the part is muted)
+                    args += ["-af", f"afade=t=in:st={fade_at:.3f}:d={f:.3f},"
+                                    f"afade=t=out:st={fade_at + max(0.0, length - f):.3f}:d={f:.3f}"]
             elif info.get("has_audio"):
                 args += ["-c:a", "copy"]
             if container in ("mkv",):

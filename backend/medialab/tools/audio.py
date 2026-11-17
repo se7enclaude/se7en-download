@@ -147,7 +147,8 @@ def _rate(codec: list[str], source_rate: int) -> list[str]:
     """Explicit output sample rate: RNNoise works at 48 kHz and loudnorm outputs 192 kHz otherwise."""
     if "libopus" in codec:
         return ["-ar", "48000"]  # the only full-band rate Opus accepts
-    return ["-ar", str(min(max(int(source_rate or SR), 8000), 96000))]
+    top = 48000 if "libmp3lame" in codec else 96000  # MP3 stops at 48 kHz
+    return ["-ar", str(min(max(int(source_rate or SR), 8000), top))]
 
 
 def _filters(opts: dict, *, denoise: str | None) -> list[str]:
@@ -219,7 +220,8 @@ class _Encoder:
 
 def _decoder(src: Path) -> subprocess.Popen:
     return subprocess.Popen([ffmpeg.require("ffmpeg"), "-hide_banner", "-nostdin", "-loglevel", "error",
-                             "-i", str(src), "-map", "0:a:0", "-vn", "-f", "f32le", "-ac", "2", "-ar", str(SR), "pipe:1"],
+                             "-i", str(src), "-map", "0:a:0", "-vn", "-af", "aresample=async=1:first_pts=0",
+                             "-f", "f32le", "-ac", "2", "-ar", str(SR), "pipe:1"],
                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, creationflags=ffmpeg.CREATE_NO_WINDOW)
 
 

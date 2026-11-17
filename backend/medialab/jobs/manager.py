@@ -239,10 +239,7 @@ class JobManager:
         return n
 
     def stats(self) -> dict:
-        jobs = self.db.list_jobs()
-        by: dict[str, int] = {}
-        for j in jobs:
-            by[j["status"]] = by.get(j["status"], 0) + 1
+        by = self.db.count_jobs_by_status()
         with self._lock:
             speed = sum((rt.progress.get("speed") or 0) for rt in self._running.values())
         return {"by_status": by, "running": len(self._running), "total_speed": speed}
@@ -283,11 +280,25 @@ class JobManager:
     def _run(self, job_id: str) -> None:
         rt = self._running[job_id]
         job = self.db.get_job(job_id)
-        assert job
-        worker = self._workers[job["kind"]]
-        attempt = int(job.get("attempts") or 0)
-        temp_dir = paths().temp / "jobs" / job_id
-        temp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # A failure here (disk full, a task kind whose plugin is gone...) must free the slot like any other:
+            # otherwise the task stays "processing" forever and blocks every next task of its kind.
+            if not job:
+                raise KeyError(job_id)
+            worker = self._workers[job["kind"]]
+            attempt = int(job.get("attempts") or 0)
+            temp_dir = paths().temp / "jobs" / job_id
+            temp_dir.mkdir(parents=True, exist_ok=True)
+        except BaseException as e:  # noqa: BLE001
+            log.error("Job %s could not start: %s", job_id, e, extra={"job_id": job_id})
+            try:
+                if job:
+                    self._failed(job_id, classify(e), MAX_AUTO_RETRIES)
+            finally:
+                with self._lock:
+                    self._running.pop(job_id, None)
+                    self._wake.notify_all()
+            return
         self._emit(job_id)
 
         def progress(p: dict) -> None:
@@ -320,12 +331,22 @@ class JobManager:
         strategy = (job.get("options") or {}).get("_strategy") or {}
         ctx = JobContext(job=job, cancel=rt.cancel, progress=progress, set_status=set_status,
                          temp_dir=temp_dir, attempt=attempt, strategy=strategy, remember=remember)
+        def settle() -> None:
+            # The final state is built on the latest progress (the database only has it every 2 s), and the
+            # final event must carry that state, not the last live progress.
+            if rt.progress:
+                self.db.update_job(job_id, progress=rt.progress)
+                rt.progress = {}
+
         try:
             result = worker(job, ctx)
+            settle()
             self._complete(job_id, result)
         except Canceled:
+            settle()
             self._stopped(job_id, rt.reason)
         except BaseException as e:  # noqa: BLE001 — every failure must be reported, never swallowed
+            settle()
             if rt.cancel.is_set():
                 # Paused / canceled / removed: what the interruption broke (a fragment that vanished,
                 # a pipe closed…) is not a failure — never an automatic retry the user did not ask for.

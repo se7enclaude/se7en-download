@@ -13,6 +13,7 @@ The optimal segmentation of each speech block is found by dynamic programming ov
 """
 from __future__ import annotations
 
+import functools
 import re
 import unicodedata
 import uuid
@@ -100,6 +101,8 @@ def ends_clause(word: str) -> bool:
 
 def visible_len(text: str) -> int:
     """Characters as the viewer sees them (combining marks don't count)."""
+    if text.isascii():  # the common case, without a per-character Unicode lookup
+        return len(text) - text.count("\n")
     return sum(1 for c in unicodedata.normalize("NFC", text) if not unicodedata.combining(c) and c != "\n")
 
 
@@ -133,6 +136,7 @@ def break_lines(text: str, lang: str, max_chars: int = 42, max_lines: int = 2) -
     return layout(text, lang, max_chars, max_lines)[0]
 
 
+@functools.lru_cache(maxsize=8192)  # the cue builder asks for the same candidates again and again
 def layout(text: str, lang: str, max_chars: int = 42, max_lines: int = 2) -> tuple[str, float]:
     """(best layout, its cost): 0 for one line; higher when the only possible breaks are poor."""
     t = flat(text)

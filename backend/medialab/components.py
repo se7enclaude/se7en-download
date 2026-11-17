@@ -150,7 +150,24 @@ def ffmpeg_dir() -> str | None:
     return str(Path(p).parent) if p else None
 
 
+_version_cache: dict[tuple, str | None] = {}
+
+
 def _version_of(binary_path: str, args: list[str], pattern: str) -> str | None:
+    """Version printed by a program; asked once per file (the list of components is read very often)."""
+    try:
+        key = (binary_path, os.stat(binary_path).st_mtime_ns, pattern)
+    except OSError:
+        key = None
+    if key in _version_cache:
+        return _version_cache[key]
+    v = _version_of_uncached(binary_path, args, pattern)
+    if key is not None and v is not None:
+        _version_cache[key] = v
+    return v
+
+
+def _version_of_uncached(binary_path: str, args: list[str], pattern: str) -> str | None:
     try:
         out = subprocess.run([binary_path, *args], capture_output=True, text=True, timeout=15,
                              creationflags=CREATE_NO_WINDOW, errors="replace")
@@ -301,7 +318,7 @@ def _extract(zip_path: Path, target: Path) -> None:
         for member in z.infolist():
             # Zip-slip protection
             dest = (target / member.filename).resolve()
-            if not str(dest).startswith(str(target.resolve())):
+            if not dest.is_relative_to(target.resolve()):
                 raise MediaLabError("bad_archive", "Downloaded archive contains unsafe paths.")
         z.extractall(target)
 
@@ -391,8 +408,12 @@ def install(cid: str, progress: Callable[[int, int], None] | None = None, wait: 
 
 def _install_ffmpeg() -> None:
     with _client() as c:
-        rel = c.get(GITHUB_API.format(repo="BtbN/FFmpeg-Builds")).json()
+        r = c.get(GITHUB_API.format(repo="BtbN/FFmpeg-Builds"))
+        rel = r.json() if r.status_code == 200 else {}
     assets = {a["name"]: a["browser_download_url"] for a in rel.get("assets", [])}
+    if not assets:  # GitHub's API refuses (rate limit on a shared connection): the permanent link still works
+        fallback = "ffmpeg-master-latest-win64-gpl-shared.zip"
+        assets = {fallback: f"https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/{fallback}"}
     # Newest *release branch* GPL build (NVENC/QSV/AMF, zimg, libplacebo included), "shared" flavour:
     # ffmpeg + ffprobe share their DLLs (~150 MB on disk instead of ~480 MB).
     release = sorted((n for n in assets if re.fullmatch(r"ffmpeg-n[\d.]+-latest-win64-gpl-shared-[\d.]+\.zip", n)),
@@ -446,7 +467,7 @@ def _extract_members(zip_path: Path, target: Path, keep: Callable[[str], bool]) 
             if not rel or member.is_dir() or not keep(rel):
                 continue
             dest = (target / rel).resolve()
-            if not str(dest).startswith(str(target.resolve())):
+            if not dest.is_relative_to(target.resolve()):
                 raise MediaLabError("bad_archive", "Downloaded archive contains unsafe paths.")
             dest.parent.mkdir(parents=True, exist_ok=True)
             with z.open(member) as src, open(dest, "wb") as out:

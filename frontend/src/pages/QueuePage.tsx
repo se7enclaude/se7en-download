@@ -20,13 +20,14 @@ import {
   Star,
   Trash2,
 } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useState } from "react";
 import { api, thumbUrl } from "../api/client";
 import type { Job } from "../api/types";
 import { Badge, Button, Empty, ErrorAlert, PageHead, PlatformChip, Progress, Segmented, StatusBadge, Thumb } from "../components/ui";
 import { useT } from "../i18n";
 import { bytes, eta, speed } from "../lib/format";
-import { flushJobUpdates, useApp } from "../store/app";
+import { useShallow } from "zustand/react/shallow";
+import { countJobs, flushJobUpdates, useApp } from "../store/app";
 
 type Filter = "all" | "download" | "upscale" | "tools";
 const FILTER_KINDS: Record<Filter, string[] | null> = { all: null, download: ["download"], upscale: ["upscale"], tools: ["convert", "trim", "studio", "subtitles"] };
@@ -34,24 +35,31 @@ const ORDER: Record<string, number> = { downloading: 0, processing: 0, analyzing
 
 export function QueuePage() {
   const t = useT();
-  const jobs = useApp((s) => s.jobs);
   const toast = useApp((s) => s.toast);
   const [filter, setFilter] = useState<Filter>("all");
 
-  const list = useMemo(
-    () =>
-      Object.values(jobs)
+  // Only the ORDER of the tasks is read here: the page re-renders when a task appears, leaves or changes
+  // place, not on each progress update (each row reads its own task).
+  const list = useApp(
+    useShallow((s) =>
+      Object.values(s.jobs)
         .filter((j) => !FILTER_KINDS[filter] || FILTER_KINDS[filter]!.includes(j.kind))
-        .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || b.priority - a.priority || a.position - b.position),
-    [jobs, filter],
+        .sort((a, b) => (ORDER[a.status] ?? 9) - (ORDER[b.status] ?? 9) || b.priority - a.priority || a.position - b.position)
+        .map((j) => j.id),
+    ),
   );
-  const all = Object.values(jobs);
-  const count = (s: string[]) => all.filter((j) => s.includes(j.status)).length;
-  const totalSpeed = all.filter((j) => j.status === "downloading").reduce((a, j) => a + (j.progress.speed || 0), 0);
+  const pending = useApp((s) => countJobs(s.jobs, ["downloading", "processing", "analyzing", "waiting"]));
+  const failed = useApp((s) => countJobs(s.jobs, ["failed"]));
 
   const bulk = async (action: string) => {
     const kinds = FILTER_KINDS[filter];
-    const r = await api.post<{ count: number }>("/api/jobs-bulk", { action, kind: kinds?.join(",") ?? null });
+    let r: { count: number };
+    try {
+      r = await api.post<{ count: number }>("/api/jobs-bulk", { action, kind: kinds?.join(",") ?? null });
+    } catch (e: any) {
+      toast({ kind: "error", title: e?.message ?? String(e), body: e?.hint });
+      return;
+    }
     if (action === "clear_finished") {
       // one update for the whole list (instead of one per removed task)
       flushJobUpdates();
@@ -69,7 +77,7 @@ export function QueuePage() {
   return (
     <div className="page-inner">
       <PageHead
-        eyebrow={t("queue.eyebrow", { n: count(["downloading", "processing", "analyzing", "waiting"]) })}
+        eyebrow={t("queue.eyebrow", { n: pending })}
         title={t("queue.title")}
         right={
           <>
@@ -89,27 +97,21 @@ export function QueuePage() {
       <div className="row rise" style={{ marginBottom: 16, flexWrap: "wrap", animationDelay: "60ms" }}>
         <Button size="sm" variant="outline" icon={<Pause size={13} />} onClick={() => bulk("pause_all")}>{t("queue.pauseAll")}</Button>
         <Button size="sm" variant="outline" icon={<Play size={13} />} onClick={() => bulk("resume_all")}>{t("queue.resumeAll")}</Button>
-        <Button size="sm" variant="outline" icon={<RotateCcw size={13} />} onClick={() => bulk("retry_failed")} disabled={!count(["failed"])}>{t("queue.retryFailed")}</Button>
+        <Button size="sm" variant="outline" icon={<RotateCcw size={13} />} onClick={() => bulk("retry_failed")} disabled={!failed}>{t("queue.retryFailed")}</Button>
         <div className="spacer" />
         <Button size="sm" variant="ghost" icon={<Trash2 size={13} />} onClick={() => bulk("clear_finished")}>{t("queue.clearFinished")}</Button>
       </div>
 
-      <div className="stat-row rise" style={{ animationDelay: "90ms" }}>
-        <Stat label={t("queue.stat.active")} value={count(["downloading", "processing", "analyzing"])} color="var(--info)" />
-        <Stat label={t("queue.stat.waiting")} value={count(["waiting", "paused"])} />
-        <Stat label={t("queue.stat.completed")} value={count(["completed"])} color="var(--success)" />
-        <Stat label={t("queue.stat.failed")} value={count(["failed"])} color={count(["failed"]) ? "var(--danger)" : undefined} />
-        <Stat label={t("queue.stat.speed")} value={speed(totalSpeed)} />
-      </div>
+      <QueueStats />
 
       {list.length === 0 ? (
         <Empty icon={<ListOrdered size={26} />} title={t("queue.emptyTitle")} body={t("queue.emptyBody")} />
       ) : (
         <div>
           <AnimatePresence initial={false}>
-            {list.map((j, i) => (
-              <motion.div key={j.id} className="job-wrap" layout={animateLayout} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0, transition: { delay: Math.min(i, 10) * 0.06, duration: 0.5, ease: [0.16, 1, 0.3, 1] } }} exit={{ opacity: 0, height: 0 }}>
-                <JobRow job={j} index={i + 1} />
+            {list.map((id, i) => (
+              <motion.div key={id} className="job-wrap" layout={animateLayout} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0, transition: { delay: Math.min(i, 10) * 0.06, duration: 0.5, ease: [0.16, 1, 0.3, 1] } }} exit={{ opacity: 0, height: 0 }}>
+                <JobItem id={id} index={i + 1} />
               </motion.div>
             ))}
           </AnimatePresence>
@@ -117,6 +119,34 @@ export function QueuePage() {
       )}
     </div>
   );
+}
+
+/** The counters: the only part of the page that follows every progress update (total speed). */
+function QueueStats() {
+  const t = useT();
+  const active = useApp((s) => countJobs(s.jobs, ["downloading", "processing", "analyzing"]));
+  const waiting = useApp((s) => countJobs(s.jobs, ["waiting", "paused"]));
+  const completed = useApp((s) => countJobs(s.jobs, ["completed"]));
+  const failed = useApp((s) => countJobs(s.jobs, ["failed"]));
+  const totalSpeed = useApp((s) => {
+    let n = 0;
+    for (const id in s.jobs) if (s.jobs[id].status === "downloading") n += s.jobs[id].progress?.speed || 0;
+    return n;
+  });
+  return (
+    <div className="stat-row rise" style={{ animationDelay: "90ms" }}>
+      <Stat label={t("queue.stat.active")} value={active} color="var(--info)" />
+      <Stat label={t("queue.stat.waiting")} value={waiting} />
+      <Stat label={t("queue.stat.completed")} value={completed} color="var(--success)" />
+      <Stat label={t("queue.stat.failed")} value={failed} color={failed ? "var(--danger)" : undefined} />
+      <Stat label={t("queue.stat.speed")} value={speed(totalSpeed)} />
+    </div>
+  );
+}
+
+function JobItem({ id, index }: { id: string; index: number }) {
+  const job = useApp((s) => s.jobs[id]);
+  return job ? <JobRow job={job} index={index} /> : null;
 }
 
 function Stat({ label, value, color }: { label: string; value: React.ReactNode; color?: string }) {
@@ -132,8 +162,9 @@ function Stat({ label, value, color }: { label: string; value: React.ReactNode; 
 export const JobRow = memo(function JobRow({ job: j, index }: { job: Job; index: number }) {
   const t = useT();
   const p = j.progress || {};
-  const act = (a: string, value?: unknown) => api.post(`/api/jobs/${j.id}/${a}`, value !== undefined ? { value } : {});
-  const open = (reveal: boolean) => api.post("/api/system/open", { path: j.result?.output_path || j.result?.file_path, reveal });
+  const fail = (e: any) => useApp.getState().toast({ kind: "error", title: e?.message ?? String(e), body: e?.hint });
+  const act = (a: string, value?: unknown) => api.post(`/api/jobs/${j.id}/${a}`, value !== undefined ? { value } : {}).catch(fail);
+  const open = (reveal: boolean) => api.post("/api/system/open", { path: j.result?.output_path || j.result?.file_path, reveal }).catch(fail);
   const active = ["downloading", "processing", "analyzing"].includes(j.status);
   const pct = j.status === "completed" ? 100 : p.percent;
   const state = j.status === "completed" ? "done" : j.status === "paused" ? "paused" : j.status === "failed" ? "failed" : active ? "active" : undefined;

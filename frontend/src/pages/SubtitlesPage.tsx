@@ -134,7 +134,6 @@ type Tab = "generate" | "edit" | "style" | "export";
 function Workspace({ pid, onClose }: { pid: string; onClose: () => void }) {
   const t = useT();
   const toast = useApp((s) => s.toast);
-  const jobs = useApp((s) => s.jobs);
   const settings = useApp((s) => s.settings);
   const lang = useApp((s) => s.settings?.general.language);
   const french = lang === "fr" || (lang !== "en" && navigator.language.startsWith("fr"));
@@ -184,16 +183,26 @@ function Workspace({ pid, onClose }: { pid: string; onClose: () => void }) {
   }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // a generation / burn already running for this project (page reopened)
-  useEffect(() => {
-    for (const j of Object.values(jobs)) {
+  // (a text made of their ids: this page, kept alive in the background, does not follow every task's progress)
+  const running = useApp((s) => {
+    let gen = "";
+    let burn = "";
+    for (const id in s.jobs) {
+      const j = s.jobs[id];
       if (j.kind !== "subtitles" || j.options?.project !== pid || !["waiting", "processing"].includes(j.status)) continue;
-      if (j.options?.op === "burn") setBurnId((x) => x ?? j.id);
-      else setJobId((x) => x ?? j.id);
+      if (j.options?.op === "burn") burn ||= j.id;
+      else gen ||= j.id;
     }
-  }, [jobs, pid]);
+    return `${gen}|${burn}`;
+  });
+  useEffect(() => {
+    const [gen, burn] = running.split("|");
+    if (burn) setBurnId((x) => x ?? burn);
+    if (gen) setJobId((x) => x ?? gen);
+  }, [running]);
 
-  const job: Job | undefined = jobId ? jobs[jobId] : undefined;
-  const burnJob: Job | undefined = burnId ? jobs[burnId] : undefined;
+  const job: Job | undefined = useApp((s) => (jobId ? s.jobs[jobId] : undefined));
+  const burnJob: Job | undefined = useApp((s) => (burnId ? s.jobs[burnId] : undefined));
   useEffect(() => {
     if (job?.status === "completed") {
       reload().then(() => setTab("edit"));
@@ -211,7 +220,9 @@ function Workspace({ pid, onClose }: { pid: string; onClose: () => void }) {
       setDetect(task);
       while (task.state === "running") {
         await new Promise((r) => setTimeout(r, 600));
+        if (!alive.current) return; // project closed meanwhile
         task = await api.get<TaskState>(`/api/tasks/${task.id}`);
+        if (!alive.current) return;
         setDetect(task);
       }
       if (task.state === "done") await reload();
@@ -236,7 +247,10 @@ function Workspace({ pid, onClose }: { pid: string; onClose: () => void }) {
     if (!dirty.current || !latest.current.style) return;
     if (alive.current) setSaved("saving");
     try {
-      await api.put(`/api/subtitles/projects/${pid}`, latest.current);
+      const sent = latest.current;
+      await api.put(`/api/subtitles/projects/${pid}`, sent);
+      // an edit made while the request was on its way is not saved yet: send it too
+      if (latest.current.cues !== sent.cues || latest.current.style !== sent.style) return void saveNow();
       dirty.current = false;
       if (alive.current) setSaved("saved");
     } catch {

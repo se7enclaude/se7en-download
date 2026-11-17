@@ -1,6 +1,7 @@
 """yt-dlp based provider (the default engine for ~1800 sites)."""
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
@@ -109,6 +110,8 @@ class YtDlpProvider(SourceProvider):
                     break
             except Exception:
                 continue
+        if len(self._detect_cache) > 5000:  # a long session scanning sites: start over rather than grow forever
+            self._detect_cache.clear()
         self._detect_cache[url] = result
         return result
 
@@ -293,7 +296,7 @@ class YtDlpProvider(SourceProvider):
                 except LookupError:
                     spec = None
             if spec is None:
-                h = "" if quality in ("best", "") else f"[height<={int(quality)}]"
+                h = "" if quality in ("best", "") else f"[height<={int(str(quality).rstrip('p'))}]"
                 spec = "ba/b" if mode == "audio" else (f"bv*{h}+ba/b{h}/bv*+ba/b" if mode == "av" else f"bv*{h}/b{h}/bv*")
                 holder["spec"] = spec
             log.info("Format selected: %s", spec, extra={"job_id": ctx.job_id})
@@ -542,8 +545,15 @@ class YtDlpProvider(SourceProvider):
         info = ffmpeg.probe(path)
         has_v, has_a = info.get("has_video"), info.get("has_audio")
         acodecs = [fmt.acodec_family(a.get("codec")) for a in info.get("audio", [])]
+        # A refused file must not stay in the staging folder: the retry would find it there, take it for
+        # "already downloaded" and fail the same way.
+        def discard() -> None:
+            with contextlib.suppress(OSError):
+                Path(path).unlink(missing_ok=True)
+
         if mode == "audio":
             if not has_a:
+                discard()
                 raise MediaLabError("no_audio_stream", "The downloaded file contains no sound.",
                                     "se7en retries with another audio format.", True)
             if has_v:
@@ -552,10 +562,12 @@ class YtDlpProvider(SourceProvider):
         if not has_v:
             log.warning("Downloaded file has no video stream (format %s)", holder.get("spec"),
                         extra={"job_id": ctx.job_id})
+            discard()
             raise MediaLabError("no_video_stream", "The platform only sent the sound for this quality.",
                                 "se7en retries automatically with another video format.", True)
         expects_audio = bool(holder.get("audio")) or bool(holder.get("video") and fmt.has_audio(holder["video"]))
         if mode == "av" and not has_a and expects_audio:
+            discard()
             raise MediaLabError("no_audio_stream", "The video was downloaded without its sound.",
                                 "se7en retries automatically with another audio format.", True)
         if mode == "video" and has_a:

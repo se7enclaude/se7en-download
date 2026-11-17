@@ -118,6 +118,14 @@ class Updater:
         return dict(self.state)
 
     # ------------------------------------------------------------ check
+    def _keep_ready(self, before: dict) -> bool:
+        """A check that fails (no network...) must not lose an update already downloaded and ready."""
+        f = getattr(self, "_file", None)
+        if before.get("state") != "ready" or not f or not Path(f).exists():
+            return False
+        self._set(**{**before, "checked": time.time()})
+        return True
+
     def check(self, manual: bool = False) -> dict:
         url = feed_url()
         if not url:
@@ -131,12 +139,16 @@ class Updater:
             with httpx.Client(follow_redirects=True, timeout=20, headers={"User-Agent": f"se7en/{__version__}"}) as c:
                 r = c.get(url)
                 if r.status_code == 404:
+                    if self._keep_ready(before):
+                        return self.snapshot()
                     self._set(state="uptodate", checked=time.time(), latest=__version__)
                     return self.snapshot()
                 r.raise_for_status()
                 manifest = r.json()
         except (httpx.HTTPError, json.JSONDecodeError, ValueError) as e:
             log.info("Update check failed: %s", e)
+            if self._keep_ready(before):
+                return self.snapshot()
             self._set(state="error", error={"code": "update_check_failed",
                                             "message": "Could not check for updates.",
                                             "hint": "Check your internet connection."}, checked=time.time())
@@ -269,7 +281,7 @@ class Updater:
         with zipfile.ZipFile(archive) as z:
             for m in z.infolist():
                 dest = (staging / m.filename).resolve()
-                if not str(dest).startswith(str(staging.resolve())):
+                if not dest.is_relative_to(staging.resolve()):
                     raise MediaLabError("bad_archive", "The update archive contains unsafe paths.")
             z.extractall(staging)
         inner = staging

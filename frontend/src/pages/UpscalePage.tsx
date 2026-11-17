@@ -113,10 +113,14 @@ export function UpscalePage() {
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setStageSize({ w: el.clientWidth, h: el.clientHeight }));
+    // one observer per stage element (it is replaced by the preview and back), and no state change for the same size:
+    // without both, the page re-rendered on every frame
+    const ro = new ResizeObserver(() =>
+      setStageSize((s) => (s.w === el.clientWidth && s.h === el.clientHeight ? s : { w: el.clientWidth, h: el.clientHeight })),
+    );
     ro.observe(el);
     return () => ro.disconnect();
-  });
+  }, [!!preview]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!caps) loadCaps().catch(() => undefined);

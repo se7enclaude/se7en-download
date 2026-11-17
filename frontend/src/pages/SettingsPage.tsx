@@ -136,6 +136,38 @@ function Row({ title, desc, children }: { title: ReactNode; desc?: ReactNode; ch
 }
 
 /** Text input that saves on blur / Enter. */
+/** A slider that follows the pointer at once and saves when it is released (not one request per step). */
+function LazyRange({ value, min, max, step, onSave, label }: { value: number; min: number; max: number; step?: number; onSave: (v: number) => unknown; label: (v: number) => ReactNode }) {
+  const [v, setV] = useState(value);
+  const held = useRef(false);
+  useEffect(() => {
+    if (!held.current) setV(value);
+  }, [value]);
+  const commit = () => {
+    held.current = false;
+    if (v !== value) onSave(v);
+  };
+  return (
+    <>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={v}
+        onChange={(e) => {
+          held.current = true;
+          setV(Number(e.target.value));
+        }}
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
+      />
+      {label(v)}
+    </>
+  );
+}
+
 function LazyInput({ value, onSave, placeholder, mono, type }: { value: string | number; onSave: (v: string) => void; placeholder?: string; mono?: boolean; type?: string }) {
   const [v, setV] = useState(String(value ?? ""));
   useEffect(() => setV(String(value ?? "")), [value]);
@@ -195,8 +227,7 @@ function General({ s, upd }: SP) {
       <Row title={t("set.volume")}>
         <div className="row">
           <Volume2 size={15} className="faint" />
-          <input type="range" min={0} max={100} value={g.sound_volume ?? 60} onChange={(e) => upd({ general: { sound_volume: Number(e.target.value) } })} onMouseUp={() => play("success")} />
-          <span className="tabular" style={{ minWidth: 40, textAlign: "right" }}>{g.sound_volume ?? 60}%</span>
+          <LazyRange min={0} max={100} value={g.sound_volume ?? 60} onSave={(v) => { upd({ general: { sound_volume: v } }); window.setTimeout(() => play("success"), 150); }} label={(v) => <span className="tabular" style={{ minWidth: 40, textAlign: "right" }}>{v}%</span>} />
           <Button size="sm" variant="ghost" onClick={() => { play("start"); window.setTimeout(() => play("success"), 400); window.setTimeout(() => play("error"), 1000); }}>{t("set.testSounds")}</Button>
         </div>
       </Row>
@@ -313,11 +344,19 @@ function Naming({ s, upd }: SP) {
   const [folders, setFolders] = useState(d.folder_structure);
   const [preview, setPreview] = useState("");
   useEffect(() => {
+    let alive = true;
     const h = window.setTimeout(async () => {
-      const r = await api.get<{ preview: string }>(`/api/naming/preview?template=${encodeURIComponent(tpl)}&folders=${encodeURIComponent(folders)}`);
-      setPreview(r.preview);
+      try {
+        const r = await api.get<{ preview: string }>(`/api/naming/preview?template=${encodeURIComponent(tpl)}&folders=${encodeURIComponent(folders)}`);
+        if (alive) setPreview(r.preview);
+      } catch {
+        /* the preview just stays as it was */
+      }
     }, 150);
-    return () => window.clearTimeout(h);
+    return () => {
+      alive = false;
+      window.clearTimeout(h);
+    };
   }, [tpl, folders]);
   const commit = () => upd({ download: { naming_template: tpl, folder_structure: folders } });
   return (
@@ -478,8 +517,7 @@ function AI({ s, upd }: SP) {
       </Row>
       <Row title={t("set.vramLimit")} desc={t("set.vramLimitDesc")}>
         <div className="row">
-          <input type="range" min={0} max={Math.max(2048, vram)} step={512} value={a.vram_limit_mb} onChange={(e) => upd({ ai: { vram_limit_mb: Number(e.target.value) } })} />
-          <span className="tabular" style={{ minWidth: 70, textAlign: "right" }}>{a.vram_limit_mb ? `${(a.vram_limit_mb / 1024).toFixed(1)} GB` : t("set.auto")}</span>
+          <LazyRange min={0} max={Math.max(2048, vram)} step={512} value={a.vram_limit_mb} onSave={(v) => upd({ ai: { vram_limit_mb: v } })} label={(v) => <span className="tabular" style={{ minWidth: 70, textAlign: "right" }}>{v ? `${(v / 1024).toFixed(1)} GB` : t("set.auto")}</span>} />
         </div>
       </Row>
       <Row title={t("set.tile")} desc={t("set.tileDesc")}>
@@ -493,8 +531,7 @@ function AI({ s, upd }: SP) {
       </Row>
       <Row title={t("upscale.videoQuality")} desc={t("upscale.videoQualityHint")}>
         <div className="row">
-          <input type="range" min={12} max={30} value={a.video_quality} onChange={(e) => upd({ ai: { video_quality: Number(e.target.value) } })} />
-          <span className="tabular" style={{ minWidth: 40 }}>{a.video_quality}</span>
+          <LazyRange min={12} max={30} value={a.video_quality} onSave={(v) => upd({ ai: { video_quality: v } })} label={(v) => <span className="tabular" style={{ minWidth: 40 }}>{v}</span>} />
         </div>
       </Row>
       <Row title={t("set.segment")} desc={t("set.segmentDesc")}>

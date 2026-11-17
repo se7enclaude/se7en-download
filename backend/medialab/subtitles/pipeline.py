@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from ..errors import MediaLabError
+from ..errors import Canceled, MediaLabError
 from ..logging_setup import get_logger
 from . import cues as C
 from . import llm as L
@@ -121,8 +121,15 @@ def generate(pid: str, opts: dict, settings, cancel: threading.Event, progress: 
         texts = [L.clean_hesitations(C.flat(c.text), src) if polish else C.flat(c.text) for c in cues]
         if llm and polish:
             lbl = "Correction du texte" if french else "Correcting the text"
-            texts, rejected = L.polish(llm, texts, src, glossary, cancel,
-                                       lambda f: progress(0.72 + (0.12 if dst != src else 0.26) * f, lbl, None))
+            try:
+                texts, rejected = L.polish(llm, texts, src, glossary, cancel,
+                                           lambda f: progress(0.72 + (0.12 if dst != src else 0.26) * f, lbl, None))
+            except Canceled:
+                raise
+            except Exception as e:  # noqa: BLE001 - correction is optional: never lose the finished transcript for it
+                log.warning("Text correction failed, transcript kept as is: %s", e)
+                notes.append(getattr(e, "message", None) or "The text correction failed; the transcript is kept as is.")
+                rejected = 0
             if rejected:
                 notes.append(f"{rejected} line(s) kept as transcribed (correction would have changed the meaning)")
         if llm and dst != src:

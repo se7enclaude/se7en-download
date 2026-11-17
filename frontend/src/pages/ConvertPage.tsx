@@ -8,7 +8,7 @@ import { Badge, Button, Field, Notice, PageHead, Progress, Segmented, Select, St
 import { useFileIntake } from "../hooks/useFileIntake";
 import { useT } from "../i18n";
 import { bytes, codecLabel, duration } from "../lib/format";
-import { useApp } from "../store/app";
+import { useApp, useJobList } from "../store/app";
 
 type Cat = "video" | "audio" | "image" | "subtitle";
 const CAT_ICON: Record<Cat, ReactNode> = { video: <Video size={14} />, audio: <AudioLines size={14} />, image: <ImageIcon size={14} />, subtitle: <Captions size={14} /> };
@@ -21,7 +21,6 @@ function fileKindLabel(f: LocalFile): Cat | "animated" {
 export function ConvertPage() {
   const t = useT();
   const settings = useApp((s) => s.settings);
-  const jobs = useApp((s) => s.jobs);
   const toast = useApp((s) => s.toast);
   const setPage = useApp((s) => s.setPage);
   const openInPlayer = useApp((s) => s.openInPlayer);
@@ -139,7 +138,7 @@ export function ConvertPage() {
     }
   };
 
-  const recent = useMemo(() => Object.values(jobs).filter((j) => j.kind === "convert").sort((a, b) => b.created_at - a.created_at).slice(0, 6), [jobs]);
+  const recent = useJobList((jobs) => jobs.filter((j) => j.kind === "convert").sort((a, b) => b.created_at - a.created_at).slice(0, 6));
   const totalSize = files.reduce((a, f) => a + (f.size ?? 0), 0);
 
   return (

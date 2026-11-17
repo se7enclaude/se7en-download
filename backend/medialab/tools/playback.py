@@ -177,8 +177,9 @@ def waveform(path: Path, buckets: int = 1600) -> dict:
     duration = float(info.get("duration") or 0)
     if not info.get("has_audio") or not duration:
         return {"peaks": [], "duration": duration, "buckets": 0}
-    # Low sample rate for long files: the envelope does not need 44.1 kHz.
-    rate = int(max(400, min(8000, buckets * 48 / duration)))
+    # 8 kHz is enough for the envelope. (A lower rate for long files only kept the bass: the waveform of a
+    # film or a concert looked almost flat.)
+    rate = 8000
     total_samples = int(duration * rate) + 1
     per = max(1, total_samples // buckets)
     cmd = [require("ffmpeg"), "-hide_banner", "-v", "error", "-nostdin", "-i", str(path), "-map", "0:a:0",

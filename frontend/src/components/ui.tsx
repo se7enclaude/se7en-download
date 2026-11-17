@@ -135,8 +135,10 @@ export function Select<T extends string | number>({
       return;
     }
     if (!open) return;
-    if (e.key === "Escape") setOpen(false);
-    else if (e.key === "ArrowDown") {
+    if (e.key === "Escape") {
+      e.stopPropagation(); // closes the list only, not the page behind it
+      setOpen(false);
+    } else if (e.key === "ArrowDown") {
       e.preventDefault();
       setHl((h) => Math.min(options.length - 1, h + 1));
     } else if (e.key === "ArrowUp") {
@@ -397,9 +399,14 @@ export function Notice({ kind = "info", title, children }: { kind?: "info" | "wa
 export function Modal({ open, onClose, title, eyebrow, children, actions, width }: { open: boolean; onClose: () => void; title?: ReactNode; eyebrow?: ReactNode; children: ReactNode; actions?: ReactNode; width?: number }) {
   useEffect(() => {
     if (!open) return;
-    const k = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", k);
-    return () => window.removeEventListener("keydown", k);
+    // capture + stop: Escape closes the dialog only, not what the page behind it does with Escape
+    const k = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onClose();
+    };
+    window.addEventListener("keydown", k, true);
+    return () => window.removeEventListener("keydown", k, true);
   }, [open, onClose]);
   return (
     <AnimatePresence>

@@ -523,12 +523,12 @@ def create_app(services: Services) -> FastAPI:
             return S.jobs.pause(job_id)
         if action == "resume":
             return S.jobs.resume(job_id)
-        if action == "cancel":
-            return S.jobs.cancel(job_id)
+        if action == "cancel":  # deletes temporary files (thousands of frames for a video): never on the event loop
+            return await run_in_threadpool(S.jobs.cancel, job_id)
         if action == "retry":
             return S.jobs.retry(job_id)
         if action == "remove":
-            S.jobs.remove(job_id)
+            await run_in_threadpool(S.jobs.remove, job_id)
             return {"ok": True}
         if action == "priority":
             return S.jobs.set_priority(job_id, int(v or 0))
@@ -538,16 +538,19 @@ def create_app(services: Services) -> FastAPI:
 
     @app.post("/api/jobs-bulk")
     async def jobs_bulk(body: BulkBody):
-        return {"count": S.jobs.bulk(body.action, body.kind)}
+        return {"count": await run_in_threadpool(S.jobs.bulk, body.action, body.kind)}
 
     # -------------------------------------------------------- history
     @app.get("/api/history")
     async def history(q: str = "", kind: str = "", platform: str = "", limit: int = 300, offset: int = 0):
-        items = S.db.list_history(q, kind, platform, limit, offset)
-        for it in items:
-            fp = it.get("file_path")
-            it["exists"] = bool(fp) and Path(fp).exists()
-        return {"items": items}
+        def read() -> list[dict]:  # a sleeping network drive makes "exists" slow: not on the event loop
+            items = S.db.list_history(q, kind, platform, limit, offset)
+            for it in items:
+                fp = it.get("file_path")
+                it["exists"] = bool(fp) and Path(fp).exists()
+            return items
+
+        return {"items": await run_in_threadpool(read)}
 
     @app.delete("/api/history/{item_id}")
     async def history_delete(item_id: str, delete_file: bool = False):
@@ -921,7 +924,13 @@ def create_app(services: Services) -> FastAPI:
             raise MediaLabError("file_missing", "File not found.")
         raw = path.read_bytes()
         utf16 = raw[:2] in (b"\xff\xfe", b"\xfe\xff")
-        text = raw.decode("utf-16") if utf16 else raw.decode("utf-8-sig", errors="replace")
+        if utf16:
+            text = raw.decode("utf-16", errors="replace")
+        else:
+            try:
+                text = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:  # older Windows files (accents were turned into "?" marks)
+                text = raw.decode("cp1252", errors="replace")
         cues = subs_formats.parse(text)
         if not cues:
             raise MediaLabError("bad_subtitles", "No subtitles found in this file.",

@@ -26,8 +26,36 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+_instance_mutex = None  # kept for the life of the process
+
+
 def _single_instance_or_focus(files: list[str] | None = None) -> bool:
-    """Return False if another instance is already running (and focus it, handing it ``files``)."""
+    """Return False if another instance is already running (and focus it, handing it ``files``).
+
+    Opening three videos at once from Explorer starts three processes together: none saw the session file of
+    the others (it is written late), so all three started, on the same database. A Windows mutex now decides:
+    the first one starts, the others wait for it to be ready and hand it their files.
+    """
+    global _instance_mutex
+    if sys.platform == "win32":
+        import ctypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.CreateMutexW.restype = ctypes.c_void_p
+        handle = k32.CreateMutexW(None, False, "Local\\se7en-instance")
+        exists = ctypes.get_last_error() == 183  # ERROR_ALREADY_EXISTS
+        _instance_mutex = handle
+        if exists:
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline:
+                if not _hand_over(files):
+                    return False
+                time.sleep(0.4)
+            return True  # the other one never became ready (it crashed while starting)
+    return _hand_over(files)
+
+
+def _hand_over(files: list[str] | None = None) -> bool:
+    """False when a running instance answered and took over (files, focus)."""
     from .security import TOKEN_HEADER, read_session_file
     info = read_session_file()
     if not info or info.get("shell") is False:  # a server / dev instance without a window: open se7en normally
@@ -140,6 +168,8 @@ def _main(argv: list[str] | None = None) -> int:
 
     services = Services(token=token, shell=shell)
     services.port = port
+    from .downloader.cookies import sweep_leftovers
+    sweep_leftovers()
     app = create_app(services)
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", access_log=False,
                             ws_ping_interval=20, ws_ping_timeout=20, log_config=None,

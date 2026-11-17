@@ -84,7 +84,7 @@ def dhash_image(im) -> int:
     """Difference hash: 8x8 comparisons of neighbouring pixels on a 9x8 grayscale thumbnail."""
     from PIL import Image
     g = im.convert("L").resize((9, 8), Image.Resampling.LANCZOS)
-    px = list(g.getdata())
+    px = g.tobytes()  # 72 gray values
     bits = 0
     for row in range(8):
         for col in range(8):
@@ -109,14 +109,17 @@ def _video_sig(f: dict, duration: float) -> str | None:
     from io import BytesIO
     from PIL import Image
     hashes = []
-    for frac in (0.2, 0.5, 0.8):
-        r = subprocess.run([ff, "-hide_banner", "-v", "error", "-ss", f"{duration * frac:.2f}", "-i", f["path"],
-                            "-frames:v", "1", "-vf", "scale=64:-2", "-f", "image2pipe", "-vcodec", "png", "-"],
-                           capture_output=True, timeout=60, creationflags=CREATE_NO_WINDOW)
-        if r.returncode != 0 or not r.stdout:
-            return None
-        with Image.open(BytesIO(r.stdout)) as im:
-            hashes.append(f"{dhash_image(im):016x}")
+    try:
+        for frac in (0.2, 0.5, 0.8):
+            r = subprocess.run([ff, "-hide_banner", "-v", "error", "-ss", f"{duration * frac:.2f}", "-i", f["path"],
+                                "-frames:v", "1", "-vf", "scale=64:-2", "-f", "image2pipe", "-vcodec", "png", "-"],
+                               capture_output=True, timeout=60, creationflags=CREATE_NO_WINDOW)
+            if r.returncode != 0 or not r.stdout:
+                return None
+            with Image.open(BytesIO(r.stdout)) as im:
+                hashes.append(f"{dhash_image(im):016x}")
+    except Exception:  # noqa: BLE001 - one unreadable video must not stop the whole search
+        return None
     return ",".join(hashes)
 
 

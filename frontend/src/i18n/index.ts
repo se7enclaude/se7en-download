@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useApp } from "../store/app";
 import { en } from "./en";
 import { fr } from "./fr";
@@ -20,11 +21,14 @@ export function translate(lang: string, key: string, vars?: Record<string, strin
 export function useT() {
   const pref = useApp((s) => s.settings?.general.language);
   const lang = resolveLang(pref);
-  const t = (key: string, vars?: Record<string, string | number>) => translate(lang, key, vars);
-  /** Translate text that normally comes from the backend; keeps the backend text when no key exists. */
-  const or = (key: string, fallback?: string | null) => {
-    const v = translate(lang, key);
-    return v === key ? fallback ?? "" : v;
-  };
-  return Object.assign(t, { lang, or });
+  // same function until the language changes: callbacks and effects that depend on `t` stay stable
+  return useMemo(() => {
+    const t = (key: string, vars?: Record<string, string | number>) => translate(lang, key, vars);
+    /** Translate text that normally comes from the backend; keeps the backend text when no key exists. */
+    const or = (key: string, fallback?: string | null) => {
+      const v = translate(lang, key);
+      return v === key ? fallback ?? "" : v;
+    };
+    return Object.assign(t, { lang, or });
+  }, [lang]);
 }

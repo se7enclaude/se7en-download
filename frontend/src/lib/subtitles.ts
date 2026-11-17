@@ -43,7 +43,18 @@ export function units(text: string, lang: string): string[] {
 const norm = (w: string) => w.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
 /** Displayed words with times: same algorithm as the burn-in (formats.word_times) so preview = export. */
+// The overlay asks for the same cue on every frame while it plays: the answer is kept per cue.
+const wordTimesCache = new WeakMap<SubCue, { key: string; out: { w: string; a: number; b: number }[] }>();
 export function wordTimes(c: SubCue, lang: string, text?: string): { w: string; a: number; b: number }[] {
+  const key = `${lang}\u0000${text ?? ""}`;
+  const hit = wordTimesCache.get(c);
+  if (hit && hit.key === key) return hit.out;
+  const out = computeWordTimes(c, lang, text);
+  wordTimesCache.set(c, { key, out });
+  return out;
+}
+
+function computeWordTimes(c: SubCue, lang: string, text?: string): { w: string; a: number; b: number }[] {
   const us = units(text ?? c.text, lang);
   if (!us.length) return [];
   const src = (c.words ?? []).filter((w) => String(w.text || "").trim());

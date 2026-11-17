@@ -6,6 +6,7 @@ import json
 import subprocess
 import threading
 from fractions import Fraction
+import re
 from pathlib import Path
 from typing import Callable
 
@@ -203,7 +204,7 @@ def run(args: list[str], *, duration: float | None = None,
             raise MediaLabError("disk_full", "Not enough disk space.", "Free up space and resume.", True, detail)
         if "out of memory" in low or "cannot allocate" in low:
             raise MediaLabError("out_of_memory", "FFmpeg ran out of memory.", "Lower the output resolution.", True, detail)
-        if "openencodesession" in low or ("nvenc" in low or "_qsv" in low or "mfx" in low or "amf" in low)                 and "error" in low:
+        if "openencodesession" in low or (re.search(r"nvenc|_qsv|qsv_|libmfx|mfx_|_amf|amf_|amfenc", low) and "error" in low):
             raise MediaLabError("encoder_failed", "The GPU video encoder failed.",
                                 "Choose a CPU encoder (libx264/libx265) in Settings › AI.", True, detail)
         raise MediaLabError("ffmpeg_failed", f"{label} failed.", "Open Logs for the FFmpeg output.", True, detail)

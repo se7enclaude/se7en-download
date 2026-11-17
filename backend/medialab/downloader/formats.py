@@ -61,13 +61,15 @@ def acodec_family(acodec: str | None) -> str | None:
     a = (acodec or "").lower()
     if not a or a == "none":
         return None
+    if a.startswith("mp4a.40.34"):  # MP3 carried in MP4 (before the general "mp4a" = AAC)
+        return "mp3"
     if a.startswith(("mp4a", "aac")):
         return "aac"
     if a.startswith("opus"):
         return "opus"
     if a.startswith("vorbis"):
         return "vorbis"
-    if a.startswith(("mp3", "mp4a.40.34")):
+    if a.startswith("mp3"):
         return "mp3"
     if a.startswith("flac"):
         return "flac"
@@ -79,7 +81,11 @@ def acodec_family(acodec: str | None) -> str | None:
 
 
 def has_video(f: dict) -> bool:
-    return f.get("vcodec") not in (None, "none") or (f.get("vcodec") is None and bool(f.get("height")))
+    if f.get("vcodec") not in (None, "none") or (f.get("vcodec") is None and bool(f.get("height"))):
+        return True
+    # nothing known but the file type (web players' bare {url, ext}): a video container is a video
+    return f.get("vcodec") is None and f.get("acodec") is None and \
+        str(f.get("ext") or "").lower() in ("mp4", "webm", "mkv", "mov", "flv", "m4v")
 
 
 def has_audio(f: dict) -> bool:
@@ -347,7 +353,7 @@ def select(formats: list[dict], *, mode: str = "av", quality: str = "best", cont
     result["video"] = video
 
     if mode == "video":
-        result["spec"] = str(video["format_id"]) if not has_audio(video) else f"{video['format_id']}"
+        result["spec"] = str(video["format_id"])
         result["strip_audio"] = has_audio(video)
         return result
 
@@ -363,7 +369,9 @@ def select(formats: list[dict], *, mode: str = "av", quality: str = "best", cont
         capped = [a for a in a_pool if (a.get("abr") or 0) <= audio_bitrate * 1.1]
         a_pool = capped or a_pool
     audio = _pick_audio(a_pool, pref)
-    result["audio"] = audio
+    # the video already carries its sound: no separate track is downloaded (it would count in the expected size
+    # and the progress bar would never reach 100 %)
+    result["audio"] = audio if audio and not has_audio(video) else None
     if audio and not has_audio(video):
         result["spec"] = f"{video['format_id']}+{audio['format_id']}"
     else:
